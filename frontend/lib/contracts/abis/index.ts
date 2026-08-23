@@ -64,6 +64,49 @@ export const PropertyRegistryABI = [
   },
   {
     type: 'function',
+    name: 'rejectSubmission',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'propertyId', type: 'uint256' },
+      { name: 'reason',     type: 'string'  },
+    ],
+    outputs: [],
+  },
+  {
+    type: 'function',
+    name: 'updateMetadata',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'propertyId', type: 'uint256' },
+      { name: 'newURI',     type: 'string'  },
+    ],
+    outputs: [],
+  },
+  {
+    type: 'function',
+    name: 'updateOfferingTerms',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'propertyId',    type: 'uint256' },
+      { name: 'totalSupply',   type: 'uint256' },
+      { name: 'pricePerToken', type: 'uint256' },
+    ],
+    outputs: [],
+  },
+  {
+    type: 'function',
+    name: 'updateLegalDetails',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'propertyId',   type: 'uint256' },
+      { name: 'spvAddress',   type: 'address' },
+      { name: 'legalHash',    type: 'bytes32' },
+      { name: 'jurisdiction', type: 'uint16'  },
+    ],
+    outputs: [],
+  },
+  {
+    type: 'function',
     name: 'openOffering',
     stateMutability: 'nonpayable',
     inputs: [
@@ -117,14 +160,25 @@ export const PropertyRegistryABI = [
     inputs: [],
     outputs: [{ name: '', type: 'bytes32' }],
   },
+  {
+    type: 'function',
+    name: 'grantRole',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'role',    type: 'bytes32' },
+      { name: 'account', type: 'address' },
+    ],
+    outputs: [],
+  },
   // Events
   {
     type: 'event',
     name: 'PropertyRegistered',
     inputs: [
-      { name: 'propertyId', type: 'uint256', indexed: true  },
-      { name: 'owner',      type: 'address', indexed: true  },
-      { name: 'metadataURI',type: 'string',  indexed: false },
+      { name: 'propertyId',  type: 'uint256', indexed: true  },
+      { name: 'owner',       type: 'address', indexed: true  },
+      { name: 'metadataURI', type: 'string',  indexed: false },
+      { name: 'totalSupply', type: 'uint256', indexed: false },
     ],
   },
   {
@@ -134,6 +188,22 @@ export const PropertyRegistryABI = [
       { name: 'propertyId', type: 'uint256', indexed: true  },
       { name: 'oldStatus',  type: 'uint8',   indexed: false },
       { name: 'newStatus',  type: 'uint8',   indexed: false },
+    ],
+  },
+  {
+    type: 'event',
+    name: 'PropertyMetadataUpdated',
+    inputs: [
+      { name: 'propertyId', type: 'uint256', indexed: true  },
+      { name: 'newURI',     type: 'string',  indexed: false },
+    ],
+  },
+  {
+    type: 'event',
+    name: 'PropertySubmissionRejected',
+    inputs: [
+      { name: 'propertyId', type: 'uint256', indexed: true  },
+      { name: 'reason',     type: 'string',  indexed: false },
     ],
   },
 ] as const;
@@ -244,6 +314,13 @@ export const KYCRegistryABI = [
     inputs: [
       { name: 'account', type: 'address', indexed: true },
     ],
+  },
+  {
+    type: 'function',
+    name: 'selfVerify',
+    stateMutability: 'nonpayable',
+    inputs: [],
+    outputs: [],
   },
 ] as const;
 
@@ -454,6 +531,114 @@ export const PropertyTokenABI = [
     ],
     outputs: [{ name: '', type: 'uint256' }],
   },
+  {
+    type: 'function',
+    name: 'name',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'string' }],
+  },
+  {
+    type: 'function',
+    name: 'symbol',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'string' }],
+  },
+  {
+    type: 'function',
+    name: 'decimals',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint8' }],
+  },
+  {
+    type: 'function',
+    name: 'maxSupply',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    type: 'function',
+    name: 'mint',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'to',     type: 'address' },
+      { name: 'amount', type: 'uint256' },
+    ],
+    outputs: [],
+  },
+  {
+    type: 'function',
+    name: 'MINTER_ROLE',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'bytes32' }],
+  },
+  {
+    type: 'function',
+    name: 'grantRole',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'role',    type: 'bytes32' },
+      { name: 'account', type: 'address' },
+    ],
+    outputs: [],
+  },
+  {
+    type: 'function',
+    name: 'hasRole',
+    stateMutability: 'view',
+    inputs: [
+      { name: 'role',    type: 'bytes32' },
+      { name: 'account', type: 'address' },
+    ],
+    outputs: [{ name: '', type: 'bool' }],
+  },
+] as const;
+
+// ─── PropertyFactory ─────────────────────────────────────────────────────────
+export const PropertyFactoryABI = [
+  {
+    type: 'function',
+    name: 'createPropertyToken',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'propertyId',           type: 'uint256' },
+      { name: 'name',                 type: 'string'  },
+      { name: 'symbol',               type: 'string'  },
+      { name: 'maxSupply',            type: 'uint256' },
+      { name: 'registryAddr',         type: 'address' },
+      { name: 'kycRegistryAddr',      type: 'address' },
+      { name: 'complianceModuleAddr', type: 'address' },
+    ],
+    outputs: [{ name: 'tokenAddress', type: 'address' }],
+  },
+  {
+    type: 'function',
+    name: 'getPropertyToken',
+    stateMutability: 'view',
+    inputs: [{ name: 'propertyId', type: 'uint256' }],
+    outputs: [{ name: '', type: 'address' }],
+  },
+  {
+    type: 'function',
+    name: 'FACTORY_ROLE',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'bytes32' }],
+  },
+  {
+    type: 'function',
+    name: 'hasRole',
+    stateMutability: 'view',
+    inputs: [
+      { name: 'role',    type: 'bytes32' },
+      { name: 'account', type: 'address' },
+    ],
+    outputs: [{ name: '', type: 'bool' }],
+  },
 ] as const;
 
 // ─── PropertyOffering ────────────────────────────────────────────────────────
@@ -520,6 +705,97 @@ export const PropertyOfferingABI = [
     stateMutability: 'view',
     inputs: [{ name: 'investor', type: 'address' }],
     outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    type: 'function',
+    name: 'pricePerToken',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    type: 'function',
+    name: 'hardCap',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    type: 'function',
+    name: 'softCap',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    type: 'function',
+    name: 'startTime',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    type: 'function',
+    name: 'endTime',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    type: 'function',
+    name: 'lockupDuration',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    type: 'function',
+    name: 'lockupExpiry',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    type: 'function',
+    name: 'totalPaymentsReceived',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    type: 'function',
+    name: 'tokenAddress',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'address' }],
+  },
+  {
+    type: 'function',
+    name: 'paymentToken',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'address' }],
+  },
+  {
+    type: 'function',
+    name: 'hasClaimedTokens',
+    stateMutability: 'view',
+    inputs: [{ name: 'investor', type: 'address' }],
+    outputs: [{ name: '', type: 'bool' }],
+  },
+  {
+    type: 'function',
+    name: 'claimTokens',
+    stateMutability: 'nonpayable',
+    inputs: [],
+    outputs: [],
+  },
+  {
+    type: 'function',
+    name: 'expireOffering',
+    stateMutability: 'nonpayable',
+    inputs: [],
+    outputs: [],
   },
 ] as const;
 

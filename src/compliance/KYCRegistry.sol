@@ -33,8 +33,10 @@ contract KYCRegistry is IKYCRegistry, Initializable, AccessControl, UUPSUpgradea
     bytes32 public constant ADMIN_ROLE    = keccak256("ADMIN_ROLE");
     bytes32 public constant VERIFIER_ROLE = keccak256("VERIFIER_ROLE");
 
-    /// @dev address => full compliance record
-    mapping(address => Types.InvestorRecord) private _investors;
+    /// @dev address => full compliance record.
+    ///      `internal` rather than `private` so a subclass (e.g. the demo registry used on
+    ///      testnets) can write records without changing this contract's storage layout.
+    mapping(address => Types.InvestorRecord) internal _investors;
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {

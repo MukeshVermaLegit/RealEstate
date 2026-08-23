@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
@@ -22,17 +23,27 @@ import {
     Marketplace__NotLister,
     Marketplace__ListingExpired,
     Marketplace__FeeTooHigh,
-    Marketplace__ZeroFeeCollector
+    Marketplace__ZeroFeeCollector,
+    Marketplace__InsufficientListingAmount
 } from "../utils/Errors.sol";
 
 /// @title Marketplace
 /// @notice Secondary market allowing KYC-verified investors to buy and sell
 ///         fractional property tokens for a designated ERC-20 payment token (e.g. USDC).
 ///         Token addresses are resolved per-listing via PropertyRegistry.
+///
+///         PRICE UNIT — `pricePerToken` is denominated in payment-token units per
+///         ONE WHOLE property token (1e18 token wei), matching PropertyOffering.
+///         Cost is therefore `amount * pricePerToken / 1e18`, rounded UP so a buyer
+///         can never acquire dust for free.
+///         Example: USDC (6 decimals) at $50.00 per token → pricePerToken = 50_000_000.
 contract Marketplace is IMarketplace, Initializable, ReentrancyGuard, Pausable, AccessControl, UUPSUpgradeable {
     using SafeERC20 for IERC20;
 
     bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
+
+    /// @dev Property tokens are 18-decimal; prices are quoted per whole token.
+    uint256 private constant PRICE_SCALE = 1e18;
 
     uint16  public constant MAX_FEE_BPS = 1000; // 10%
     uint16  public feeBps;
@@ -122,7 +133,12 @@ contract Marketplace is IMarketplace, Initializable, ReentrancyGuard, Pausable, 
             revert Marketplace__ListingExpired(listingId);
         }
 
-        uint256 totalCost = amount * listing.pricePerToken;
+        if (amount > listing.tokenAmount) {
+            revert Marketplace__InsufficientListingAmount(listingId, amount, listing.tokenAmount);
+        }
+
+        // Round UP so dust purchases can never be free.
+        uint256 totalCost = Math.mulDiv(amount, listing.pricePerToken, PRICE_SCALE, Math.Rounding.Ceil);
 
         // Reduce listing token amount
         listing.tokenAmount -= amount;
@@ -170,6 +186,8 @@ contract Marketplace is IMarketplace, Initializable, ReentrancyGuard, Pausable, 
 
     function setFee(uint16 newFeeBps) external onlyRole(ADMIN_ROLE) {
         if (newFeeBps > MAX_FEE_BPS) revert Marketplace__FeeTooHigh(newFeeBps, MAX_FEE_BPS);
+        // A non-zero fee with no collector would be silently skipped in buyListing().
+        if (newFeeBps > 0 && feeCollector == address(0)) revert Marketplace__ZeroFeeCollector();
         feeBps = newFeeBps;
         emit FeeUpdated(newFeeBps);
     }

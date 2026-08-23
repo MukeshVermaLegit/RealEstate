@@ -1,33 +1,24 @@
 'use client';
 
-import { useState } from 'react';
-import { useAccount } from 'wagmi';
-import { formatUnits } from 'viem';
+import { useEffect, useState } from 'react';
+import { useAccount, useWaitForTransactionReceipt } from 'wagmi';
 import { useIPFSMetadata } from '../lib/hooks/useIPFSMetadata';
 import { useCancelListing, type Listing } from '../lib/hooks/useMarketplace';
-import { useWaitForTransactionReceipt } from 'wagmi';
+import { cleanTxError, expiryLabel, formatTokens, formatUsd, shortAddress } from '../lib/format';
+import { Badge, Button } from './ui';
 
 interface ListingCardProps {
-  listing:    Listing;
+  listing: Listing;
   metadataURI?: string;
-  onBuy:      (listing: Listing) => void;
+  onBuy: (listing: Listing) => void;
   onCancelled?: () => void;
 }
 
-function ExpiryLabel({ expiresAt }: { expiresAt: bigint }) {
-  if (expiresAt === 0n) {
-    return <span className="text-gray-400 text-xs">No expiry</span>;
-  }
-  const now  = Math.floor(Date.now() / 1000);
-  const diff = Number(expiresAt) - now;
-  if (diff <= 0) {
-    return <span className="text-red-500 text-xs font-medium">Expired</span>;
-  }
-  const days = Math.ceil(diff / 86400);
+function ExpiryBadge({ expiresAt }: { expiresAt: bigint }) {
+  const expiry = expiryLabel(expiresAt);
+  if (!expiry) return <span className="text-[11px] text-faint">No expiry</span>;
   return (
-    <span className="text-amber-600 text-xs font-medium">
-      Expires in {days} day{days !== 1 ? 's' : ''}
-    </span>
+    <Badge tone={expiry.expired ? 'negative' : 'warn'}>{expiry.text}</Badge>
   );
 }
 
@@ -36,119 +27,106 @@ export function ListingCard({ listing, metadataURI, onBuy, onCancelled }: Listin
   const { data: meta } = useIPFSMetadata(metadataURI ?? '');
 
   const cancelListing = useCancelListing();
-  const [cancelHash,  setCancelHash]  = useState<`0x${string}` | undefined>();
+  const [cancelHash, setCancelHash] = useState<`0x${string}` | undefined>();
   const [cancelError, setCancelError] = useState('');
-  const [cancelling,  setCancelling]  = useState(false);
+  const [signing, setSigning] = useState(false);
 
   const { isLoading: waitingCancel, isSuccess: cancelSuccess } = useWaitForTransactionReceipt({
     hash: cancelHash,
   });
 
-  if (cancelSuccess) {
-    onCancelled?.();
-  }
+  // Notify the parent once the receipt lands — never during render.
+  useEffect(() => {
+    if (cancelSuccess) onCancelled?.();
+  }, [cancelSuccess, onCancelled]);
 
   const isSeller = address?.toLowerCase() === listing.seller.toLowerCase();
-
-  // token amount is 18-decimal fractional token
-  const tokenAmtDisplay = formatUnits(listing.tokenAmount, 18).replace(/\.?0+$/, '');
-  // pricePerToken is 18-decimal USD
-  const priceDisplay = parseFloat(formatUnits(listing.pricePerToken, 18)).toLocaleString('en-US', {
-    minimumFractionDigits: 2, maximumFractionDigits: 2,
-  });
-  const totalCost = listing.tokenAmount * listing.pricePerToken / 10n ** 18n;
-  const totalDisplay = parseFloat(formatUnits(totalCost, 18)).toLocaleString('en-US', {
-    minimumFractionDigits: 2, maximumFractionDigits: 2,
-  });
-
-  const sellerShort = `${listing.seller.slice(0, 6)}…${listing.seller.slice(-4)}`;
+  const totalCost = (listing.tokenAmount * listing.pricePerToken) / 10n ** 18n;
 
   const handleCancel = async () => {
-    setCancelling(true);
+    setSigning(true);
     setCancelError('');
     try {
       const hash = await cancelListing(listing.listingId);
       setCancelHash(hash);
     } catch (e) {
-      setCancelError(e instanceof Error ? e.message.slice(0, 100) : 'Failed');
-      setCancelling(false);
+      setCancelError(cleanTxError(e, 90));
+    } finally {
+      setSigning(false);
     }
   };
 
-  const cancelLoading = cancelling || waitingCancel;
+  const cancelLoading = signing || waitingCancel;
 
   return (
-    <div className="flex flex-col rounded-2xl border border-gray-200 bg-white shadow-sm hover:shadow-md transition-shadow overflow-hidden">
+    <div className="flex flex-col overflow-hidden rounded-2xl border border-hairline bg-surface shadow-card transition-colors hover:border-edge">
       {/* Header */}
-      <div className="px-5 py-4 border-b border-gray-100">
-        <div className="flex items-start justify-between gap-2">
-          <div>
-            <p className="font-semibold text-gray-900 text-sm leading-tight">
-              {meta?.name ?? `Property #${listing.propertyId}`}
+      <div className="border-b border-hairline px-5 py-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold leading-tight text-ink">
+              {meta?.name || `Property #${listing.propertyId}`}
             </p>
-            {meta?.location && (
-              <p className="text-xs text-gray-400 mt-0.5">{meta.location}</p>
-            )}
+            <p className="mt-0.5 truncate text-xs text-muted">
+              {meta?.location || `Property #${listing.propertyId}`}
+            </p>
           </div>
-          <span className="shrink-0 rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-semibold text-indigo-600">
+          <span className="shrink-0 rounded-md border border-hairline bg-elevated px-2 py-0.5 font-mono text-[11px] text-faint">
             #{listing.listingId.toString()}
           </span>
         </div>
       </div>
 
-      {/* Body */}
-      <div className="px-5 py-4 space-y-2 flex-1">
-        <div className="flex justify-between text-sm">
-          <span className="text-gray-500">Tokens</span>
-          <span className="font-medium text-gray-900">{tokenAmtDisplay}</span>
+      {/* Figures */}
+      <div className="flex-1 space-y-2.5 px-5 py-4">
+        <div className="flex items-baseline justify-between text-sm">
+          <span className="text-muted">Tokens</span>
+          <span className="tabular font-medium text-ink">{formatTokens(listing.tokenAmount)}</span>
         </div>
-        <div className="flex justify-between text-sm">
-          <span className="text-gray-500">Price / token</span>
-          <span className="font-medium text-gray-900">${priceDisplay}</span>
+        <div className="flex items-baseline justify-between text-sm">
+          <span className="text-muted">Price / token</span>
+          <span className="tabular font-medium text-ink">{formatUsd(listing.pricePerToken)}</span>
         </div>
-        <div className="flex justify-between text-sm">
-          <span className="text-gray-500">Total cost</span>
-          <span className="font-semibold text-indigo-600">${totalDisplay}</span>
+        <div className="rule-fade" />
+        <div className="flex items-baseline justify-between text-sm">
+          <span className="text-muted">Total</span>
+          <span className="tabular font-display text-base font-semibold text-accent">
+            {formatUsd(totalCost)}
+          </span>
         </div>
-        <div className="flex justify-between text-sm">
-          <span className="text-gray-500">Seller</span>
-          <span className="font-mono text-xs text-gray-700">{sellerShort}</span>
+        <div className="flex items-baseline justify-between text-sm">
+          <span className="text-muted">Seller</span>
+          <span className="font-mono text-xs text-muted">
+            {isSeller ? 'You' : shortAddress(listing.seller)}
+          </span>
         </div>
       </div>
 
-      {/* Footer */}
-      <div className="px-5 py-3 border-t border-gray-100 flex items-center justify-between gap-2">
-        <ExpiryLabel expiresAt={listing.expiresAt} />
+      {/* Action */}
+      <div className="flex items-center justify-between gap-3 border-t border-hairline px-5 py-3">
+        <ExpiryBadge expiresAt={listing.expiresAt} />
 
         {isSeller ? (
-          <button
+          <Button
+            variant="danger"
+            size="sm"
+            loading={cancelLoading}
+            disabled={cancelSuccess}
             onClick={() => void handleCancel()}
-            disabled={cancelLoading || cancelSuccess}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-100 disabled:opacity-50 transition-colors"
           >
-            {cancelLoading ? (
-              <>
-                <span className="h-3 w-3 rounded-full border-2 border-red-400 border-t-transparent animate-spin" />
-                {waitingCancel ? 'Cancelling…' : 'Signing…'}
-              </>
-            ) : cancelSuccess ? (
-              '✓ Cancelled'
-            ) : (
-              'Cancel'
-            )}
-          </button>
+            {cancelSuccess ? 'Cancelled' : cancelLoading && waitingCancel ? 'Cancelling…' : 'Cancel'}
+          </Button>
         ) : (
-          <button
-            onClick={() => onBuy(listing)}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700 transition-colors"
-          >
-            Buy
-          </button>
+          <Button size="sm" onClick={() => onBuy(listing)}>
+            Buy tokens
+          </Button>
         )}
       </div>
 
       {cancelError && (
-        <p className="px-5 pb-3 text-[11px] text-red-500 leading-tight">{cancelError}</p>
+        <p className="border-t border-hairline px-5 py-2.5 text-[11px] leading-tight text-negative">
+          {cancelError}
+        </p>
       )}
     </div>
   );

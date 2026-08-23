@@ -1,301 +1,353 @@
 'use client';
 
-import { useState, useRef } from 'react';
-import { useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useAccount, useChainId, useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
 import { parseUnits, isAddress, keccak256, toBytes } from 'viem';
 import { PropertyRegistryABI } from '@/lib/contracts/abis';
 import { useContracts } from '@/lib/contracts/useContracts';
+import COUNTRY_MAP from '@/lib/constants/countries';
+import { cleanTxError } from '@/lib/format';
+import {
+  buildMetadata,
+  claimDraftMedia,
+  newDraftId,
+  pinFile,
+  pinJson,
+  propertyIdFromReceipt,
+  type PinContext,
+} from '@/lib/listing';
+import { IpfsUri } from './IpfsUri';
+import {
+  Alert,
+  Button,
+  Field,
+  Input,
+  InputWithPrefix,
+  Modal,
+  Select,
+  Spinner,
+  Textarea,
+} from './ui';
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-type UploadStep = 'idle' | 'image' | 'metadata' | 'tx' | 'done' | 'error';
+type UploadStep = 'idle' | 'image' | 'metadata' | 'tx' | 'sent' | 'error';
 
 type FormState = {
-  name:         string;
-  description:  string;
-  location:     string;
-  totalSupply:  string;
-  pricePerToken:string; // USD, 18-decimal on-chain
-  spvAddress:   string;
-  jurisdiction: string; // ISO 3166-1 numeric as string
+  name: string;
+  description: string;
+  location: string;
+  totalSupply: string;
+  pricePerToken: string;
+  spvAddress: string;
+  jurisdiction: string;
 };
 
 const EMPTY_FORM: FormState = {
-  name:         '',
-  description:  '',
-  location:     '',
-  totalSupply:  '',
-  pricePerToken:'',
-  spvAddress:   '',
-  jurisdiction: '840', // US default
+  name: '',
+  description: '',
+  location: '',
+  totalSupply: '',
+  pricePerToken: '',
+  spvAddress: '',
+  jurisdiction: '840',
 };
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+const STEP_LABEL: Record<UploadStep, string> = {
+  idle: '',
+  image: 'Uploading cover image to IPFS…',
+  metadata: 'Pinning metadata to IPFS…',
+  tx: 'Waiting for wallet signature…',
+  sent: 'Confirming on-chain…',
+  error: '',
+};
 
-async function pinFile(file: File, name: string): Promise<string> {
-  const fd = new FormData();
-  fd.append('file', file, file.name);
-  fd.append('name', name);
-  const res = await fetch('/api/pin', { method: 'POST', body: fd });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error ?? 'Image upload failed');
-  return data.ipfsUri as string;
-}
-
-async function pinJson(json: object, name: string): Promise<string> {
-  const res = await fetch('/api/pin', {
-    method:  'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({ json, name }),
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error ?? 'Metadata upload failed');
-  return data.ipfsUri as string;
-}
-
-// ─── Component ───────────────────────────────────────────────────────────────
-
-type Props = {
-  onClose:   () => void;
+export function RegisterPropertyModal({
+  onClose,
+  onSuccess,
+}: {
+  onClose: () => void;
   onSuccess: () => void;
-};
-
-export function RegisterPropertyModal({ onClose, onSuccess }: Props) {
-  const { addresses }   = useContracts();
+}) {
+  const { addresses } = useContracts();
+  const { address } = useAccount();
+  const chainId = useChainId();
   const { writeContract, data: txHash } = useWriteContract();
-  const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash: txHash });
+  const { isSuccess, data: receipt } = useWaitForTransactionReceipt({ hash: txHash });
 
-  const [form,       setForm]       = useState<FormState>(EMPTY_FORM);
-  const [imageFile,  setImageFile]  = useState<File | null>(null);
-  const [imagePreview, setImagePreview] = useState<string>('');
-  const [step,       setStep]       = useState<UploadStep>('idle');
-  const [errorMsg,   setErrorMsg]   = useState('');
+  /** Groups this modal's pins until the chain assigns a property id. */
+  const draftId = useRef(newDraftId());
+
+  const [form, setForm] = useState<FormState>(EMPTY_FORM);
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState('');
+  const [step, setStep] = useState<UploadStep>('idle');
+  /** Set once the metadata is pinned, so the operator can verify the exact URI going on-chain. */
+  const [metadataUri, setMetadataUri] = useState('');
+  const [errorMsg, setErrorMsg] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // ── field change ────────────────────────────────────────────────────────
-  function handleChange(e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) {
-    setForm((prev) => ({ ...prev, [e.target.name]: e.target.value }));
-  }
+  const countries = useMemo(
+    () =>
+      Object.entries(COUNTRY_MAP)
+        .map(([code, name]) => ({ code, name }))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [],
+  );
+
+  // Release the object URL when the preview changes or the modal unmounts.
+  useEffect(() => {
+    if (!imagePreview) return;
+    return () => URL.revokeObjectURL(imagePreview);
+  }, [imagePreview]);
+
+  // Report success from an effect, not the render body.
+  useEffect(() => {
+    if (!isSuccess) return;
+    // Attach the pinned image and metadata to the id the registry just assigned.
+    const createdId = receipt ? propertyIdFromReceipt(receipt.logs) : null;
+    if (createdId !== null) {
+      void claimDraftMedia(draftId.current, Number(createdId));
+    }
+    onSuccess();
+  }, [isSuccess, receipt, onSuccess]);
+
+  const set = (key: keyof FormState) => (
+    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>,
+  ) => setForm((prev) => ({ ...prev, [key]: e.target.value }));
 
   function handleImageChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0] ?? null;
     setImageFile(file);
-    if (file) {
-      const url = URL.createObjectURL(file);
-      setImagePreview(url);
-    } else {
-      setImagePreview('');
-    }
+    setImagePreview(file ? URL.createObjectURL(file) : '');
   }
 
-  // ── submit ──────────────────────────────────────────────────────────────
+  function validate(): string | null {
+    if (!form.name.trim()) return 'Property name is required.';
+    if (!form.totalSupply || Number(form.totalSupply) <= 0) return 'Total supply must be above zero.';
+    if (!Number.isInteger(Number(form.totalSupply))) return 'Total supply must be a whole number of tokens.';
+    if (!form.pricePerToken || Number(form.pricePerToken) <= 0)
+      return 'Price per token must be above zero.';
+    if (!isAddress(form.spvAddress)) return 'SPV address must be a valid Ethereum address.';
+    if (!form.jurisdiction) return 'Jurisdiction is required.';
+    return null;
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setErrorMsg('');
+    setMetadataUri('');
 
-    // Validate
-    if (!form.name.trim())                       return setErrorMsg('Property name is required');
-    if (!form.totalSupply || Number(form.totalSupply) <= 0) return setErrorMsg('Total supply must be > 0');
-    if (!form.pricePerToken || Number(form.pricePerToken) <= 0) return setErrorMsg('Price per token must be > 0');
-    if (!isAddress(form.spvAddress))             return setErrorMsg('SPV address must be a valid Ethereum address');
-    if (!form.jurisdiction)                      return setErrorMsg('Jurisdiction is required');
+    const invalid = validate();
+    if (invalid) {
+      setErrorMsg(invalid);
+      return;
+    }
 
     try {
-      // 1) Upload image (optional — skip if none selected)
+      const pinCtx: PinContext = {
+        draftId: draftId.current,
+        uploadedBy: address,
+        chainId,
+      };
+
       let imageUri = '';
       if (imageFile) {
         setStep('image');
-        imageUri = await pinFile(imageFile, `${form.name} — image`);
+        imageUri = (await pinFile(imageFile, `${form.name} — image`, {
+          ...pinCtx,
+          kind: 'image',
+        })).uri;
       }
 
-      // 2) Upload metadata JSON
       setStep('metadata');
-      const metadata = {
-        name:        form.name.trim(),
-        description: form.description.trim(),
-        location:    form.location.trim(),
-        imageUrl:    imageUri,
-        documents:   [] as string[],
-      };
-      const metadataUri = await pinJson(metadata, `${form.name} — metadata`);
+      const metadata = buildMetadata({
+        name: form.name,
+        description: form.description,
+        location: form.location,
+        // The admin path stays a one-photo quick register; the self-serve wizard
+        // is where a full gallery is built.
+        imageUris: imageUri ? [imageUri] : [],
+        documentUris: [],
+      });
+      const { uri: pinnedUri } = await pinJson(metadata, `${form.name} — metadata`, {
+        ...pinCtx,
+        kind: 'metadata',
+      });
+      setMetadataUri(pinnedUri);
 
-      // 3) Derive legalHash from metadata IPFS URI (deterministic — can be replaced with a real PDF hash)
-      const legalHash = keccak256(toBytes(metadataUri)) as `0x${string}`;
+      // Deterministic placeholder — swap for a hash of the executed PDF pack.
+      const legalHash = keccak256(toBytes(pinnedUri)) as `0x${string}`;
 
-      // 4) Send registerProperty tx
       setStep('tx');
       writeContract(
         {
-          address:      addresses.propertyRegistry,
-          abi:          PropertyRegistryABI,
+          address: addresses.propertyRegistry,
+          abi: PropertyRegistryABI,
           functionName: 'registerProperty',
           args: [
-            metadataUri,
+            pinnedUri,
             BigInt(form.totalSupply),
             parseUnits(form.pricePerToken, 18),
             form.spvAddress as `0x${string}`,
             legalHash,
-            Number(form.jurisdiction) as unknown as number,
+            Number(form.jurisdiction),
           ],
         },
         {
-          onSuccess: () => setStep('done'),
+          onSuccess: () => setStep('sent'),
           onError: (err) => {
             setStep('error');
-            setErrorMsg(err.message.split('\n')[0]);
+            setErrorMsg(cleanTxError(err));
           },
         },
       );
     } catch (err: unknown) {
       setStep('error');
-      setErrorMsg(err instanceof Error ? err.message : String(err));
+      setErrorMsg(cleanTxError(err));
     }
-  }
-
-  // close after confirmation
-  if (isSuccess && step === 'done') {
-    onSuccess();
-    return null;
   }
 
   const busy = step !== 'idle' && step !== 'error';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
-      <div className="relative w-full max-w-xl bg-white rounded-2xl shadow-xl overflow-y-auto max-h-[90vh]">
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-          <h2 className="text-lg font-semibold text-gray-900">Register New Property</h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
+    <Modal
+      title="Register a property"
+      description="Pins metadata to IPFS, then writes the asset into the on-chain registry."
+      onClose={onClose}
+      size="lg"
+    >
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <Field label="Property name" htmlFor="reg-name">
+          <Input
+            id="reg-name"
+            value={form.name}
+            onChange={set('name')}
+            placeholder="123 Main St, Miami FL"
+          />
+        </Field>
+
+        <Field label="Description" htmlFor="reg-desc">
+          <Textarea
+            id="reg-desc"
+            rows={3}
+            value={form.description}
+            onChange={set('description')}
+            placeholder="Property overview, features, investment thesis…"
+          />
+        </Field>
+
+        <Field label="Location" htmlFor="reg-location" hint="Shown on cards and search">
+          <Input
+            id="reg-location"
+            value={form.location}
+            onChange={set('location')}
+            placeholder="Miami, United States"
+          />
+        </Field>
+
+        {/* Cover image */}
+        <Field label="Cover image" hint="Optional">
+          <button
+            type="button"
+            onClick={() => fileRef.current?.click()}
+            className="flex w-full items-center gap-3 rounded-xl border border-hairline bg-elevated px-3 py-2.5 text-left transition-colors hover:border-accent/40"
+          >
+            {imagePreview ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={imagePreview} alt="Cover preview" className="h-12 w-12 rounded-lg object-cover" />
+            ) : (
+              <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border border-hairline bg-surface text-faint">
+                <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+                  <rect x="3" y="5" width="18" height="14" rx="2" />
+                  <circle cx="8.5" cy="10" r="1.5" />
+                  <path d="m4 17 5-4.5 3.5 3L16 12l4 4" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </span>
+            )}
+            <span className="min-w-0 flex-1 truncate text-sm text-muted">
+              {imageFile ? imageFile.name : 'Choose an image…'}
+            </span>
+            <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleImageChange} />
+          </button>
+        </Field>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Total supply" htmlFor="reg-supply" hint="whole tokens">
+            <Input
+              id="reg-supply"
+              type="number"
+              min="1"
+              step="1"
+              value={form.totalSupply}
+              onChange={set('totalSupply')}
+              placeholder="1000000"
+              className="tabular"
+            />
+          </Field>
+
+          <Field label="Price per token" htmlFor="reg-price">
+            <InputWithPrefix
+              id="reg-price"
+              prefix="$"
+              type="number"
+              min="0.000001"
+              step="any"
+              value={form.pricePerToken}
+              onChange={set('pricePerToken')}
+              placeholder="1.00"
+              className="tabular"
+            />
+          </Field>
         </div>
 
-        <form onSubmit={handleSubmit} className="px-6 py-5 space-y-4">
-          {/* Name */}
-          <Field label="Property Name *">
-            <input
-              name="name" value={form.name} onChange={handleChange}
-              placeholder="e.g. 123 Main St, Miami FL"
-              className={inputCls}
-            />
-          </Field>
+        <Field label="SPV wallet address" htmlFor="reg-spv" hint="Holds legal title">
+          <Input
+            id="reg-spv"
+            value={form.spvAddress}
+            onChange={set('spvAddress')}
+            placeholder="0x…"
+            className="font-mono text-xs"
+            spellCheck={false}
+          />
+        </Field>
 
-          {/* Description */}
-          <Field label="Description">
-            <textarea
-              name="description" value={form.description} onChange={handleChange}
-              rows={3} placeholder="Property overview, features, investment thesis…"
-              className={inputCls}
-            />
-          </Field>
+        <Field label="Jurisdiction" htmlFor="reg-juris" hint="ISO 3166-1 numeric">
+          <Select id="reg-juris" value={form.jurisdiction} onChange={set('jurisdiction')}>
+            {countries.map((c) => (
+              <option key={c.code} value={c.code}>
+                {c.name} ({c.code})
+              </option>
+            ))}
+          </Select>
+        </Field>
 
-          {/* Location */}
-          <Field label="Location">
-            <input
-              name="location" value={form.location} onChange={handleChange}
-              placeholder="City, Country"
-              className={inputCls}
-            />
-          </Field>
+        {errorMsg && <Alert tone="negative">{errorMsg}</Alert>}
 
-          {/* Image */}
-          <Field label="Cover Image (optional)">
-            <div
-              className="flex items-center gap-3 border border-gray-200 rounded-lg px-3 py-2 cursor-pointer hover:border-indigo-400 transition-colors"
-              onClick={() => fileRef.current?.click()}
-            >
-              {imagePreview
-                ? <img src={imagePreview} alt="preview" className="h-12 w-12 rounded object-cover" />
-                : <div className="h-12 w-12 rounded bg-gray-100 flex items-center justify-center text-gray-400 text-xs">IMG</div>
-              }
-              <span className="text-sm text-gray-500">{imageFile ? imageFile.name : 'Click to select image'}</span>
-              <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleImageChange} />
-            </div>
-          </Field>
-
-          {/* Supply + Price row */}
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Total Supply (tokens) *">
-              <input
-                name="totalSupply" value={form.totalSupply} onChange={handleChange}
-                type="number" min="1" step="1" placeholder="1000000"
-                className={inputCls}
-              />
-            </Field>
-            <Field label="Price per Token (USD) *">
-              <input
-                name="pricePerToken" value={form.pricePerToken} onChange={handleChange}
-                type="number" min="0.000001" step="any" placeholder="1.00"
-                className={inputCls}
-              />
-            </Field>
+        {busy && (
+          <div className="flex items-center gap-2 rounded-xl border border-accent/20 bg-accent/[0.07] px-4 py-3 text-xs text-accent">
+            <Spinner size="xs" />
+            {STEP_LABEL[step]}
           </div>
+        )}
 
-          {/* SPV Address */}
-          <Field label="SPV Wallet Address *">
-            <input
-              name="spvAddress" value={form.spvAddress} onChange={handleChange}
-              placeholder="0x..."
-              className={inputCls}
-            />
-          </Field>
-
-          {/* Jurisdiction */}
-          <Field label="Jurisdiction (ISO 3166-1 numeric) *">
-            <input
-              name="jurisdiction" value={form.jurisdiction} onChange={handleChange}
-              type="number" min="1" max="999" placeholder="840 = United States"
-              className={inputCls}
-            />
-            <p className="mt-1 text-xs text-gray-400">Common: 840=US, 826=UK, 276=DE, 356=IN, 702=SG</p>
-          </Field>
-
-          {/* Error */}
-          {errorMsg && (
-            <p className="text-sm text-red-500 bg-red-50 rounded-lg px-3 py-2">{errorMsg}</p>
-          )}
-
-          {/* Progress */}
-          {busy && (
-            <div className="flex items-center gap-2 text-sm text-indigo-600">
-              <span className="h-4 w-4 rounded-full border-2 border-indigo-300 border-t-indigo-600 animate-spin" />
-              {step === 'image'    && 'Uploading image to IPFS…'}
-              {step === 'metadata' && 'Pinning metadata to IPFS…'}
-              {step === 'tx'       && 'Waiting for wallet…'}
-              {(step === 'done' && isConfirming) && 'Confirming on-chain…'}
-            </div>
-          )}
-
-          {/* Actions */}
-          <div className="flex justify-end gap-3 pt-2">
-            <button
-              type="button" onClick={onClose} disabled={busy}
-              className="px-4 py-2 text-sm rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-50"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit" disabled={busy}
-              className="px-5 py-2 text-sm rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-700 disabled:opacity-50"
-            >
-              {busy ? 'Processing…' : 'Register Property'}
-            </button>
+        {metadataUri && (
+          <div className="space-y-2">
+            <p className="text-xs leading-relaxed text-muted">
+              Metadata pinned. The registry stores this identifier, not the file itself — open it to
+              check exactly what buyers will read.
+            </p>
+            <IpfsUri uri={metadataUri} label="Pinned metadata" />
           </div>
-        </form>
-      </div>
-    </div>
-  );
-}
+        )}
 
-// ─── tiny helpers ─────────────────────────────────────────────────────────────
-
-const inputCls =
-  'w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400';
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <label className="block text-xs font-medium text-gray-700 mb-1">{label}</label>
-      {children}
-    </div>
+        <div className="flex justify-end gap-2 pt-1">
+          <Button type="button" variant="ghost" onClick={onClose} disabled={busy}>
+            Cancel
+          </Button>
+          <Button type="submit" loading={busy}>
+            Register property
+          </Button>
+        </div>
+      </form>
+    </Modal>
   );
 }

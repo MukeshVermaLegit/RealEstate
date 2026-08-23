@@ -2,26 +2,138 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ─────────────────────────────────────────────────────────────────────────────
+   Design tokens — dark premium fintech.
+   Values are space-separated RGB triplets so Tailwind can apply <alpha-value>.
+   ───────────────────────────────────────────────────────────────────────────── */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --c-base:         10  11  15;   /* #0A0B0F */
+  --c-surface:      18  20  26;   /* #12141A */
+  --c-elevated:     25  28  36;   /* #191C24 */
+  --c-overlay:      20  22  29;   /* #14161D */
+
+  --c-hairline:     35  38  47;   /* #23262F */
+  --c-edge:         46  50  61;   /* #2E323D */
+
+  --c-ink:         242 244 247;   /* #F2F4F7 */
+  --c-muted:       155 161 174;   /* #9BA1AE */
+  --c-faint:       110 116 128;   /* #6E7480 */
+
+  --c-accent:      245 158  11;   /* #F59E0B */
+  --c-accent-hover:251 191  36;   /* #FBBF24 */
+  --c-accent-soft:  58  42  10;   /* #3A2A0A */
+  --c-accent-ink:   10  11  15;   /* on-accent text */
+
+  --c-positive:     52 211 153;   /* #34D399 */
+  --c-info:         96 165 250;   /* #60A5FA */
+  --c-warn:        251 191  36;   /* #FBBF24 */
+  --c-negative:    248 113 113;   /* #F87171 */
+
+  color-scheme: dark;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+@layer base {
+  * {
+    border-color: rgb(var(--c-hairline));
   }
-}
 
-body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    background-color: rgb(var(--c-base));
+    color: rgb(var(--c-ink));
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  h1, h2, h3, h4 {
+    font-family: var(--font-sora), var(--font-inter), ui-sans-serif, sans-serif;
+    letter-spacing: -0.02em;
+  }
+
+  ::selection {
+    background-color: rgb(var(--c-accent) / 0.28);
+    color: rgb(var(--c-ink));
+  }
+
+  /* Focus ring — accent, never removed */
+  :focus-visible {
+    outline: 2px solid rgb(var(--c-accent) / 0.7);
+    outline-offset: 2px;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar        { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track  { background: rgb(var(--c-base)); }
+  ::-webkit-scrollbar-thumb  {
+    background: rgb(var(--c-edge));
+    border-radius: 9999px;
+    border: 2px solid rgb(var(--c-base));
+  }
+  ::-webkit-scrollbar-thumb:hover { background: rgb(var(--c-faint) / 0.7); }
+
+  /* Kill the browser's light-mode autofill wash */
+  input:-webkit-autofill,
+  input:-webkit-autofill:focus {
+    -webkit-text-fill-color: rgb(var(--c-ink));
+    -webkit-box-shadow: 0 0 0 1000px rgb(var(--c-elevated)) inset;
+  }
+
+  /* Number inputs: drop the spinners, they look broken on dark */
+  input[type="number"]::-webkit-outer-spin-button,
+  input[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  input[type="number"] { -moz-appearance: textfield; }
 }
 
 @layer utilities {
-  .text-balance {
-    text-wrap: balance;
+  .text-balance { text-wrap: balance; }
+  .text-pretty  { text-wrap: pretty; }
+
+  /* Numeric columns that must not jitter as values change */
+  .tabular { font-variant-numeric: tabular-nums; }
+
+  /* Hairline divider that fades at both ends */
+  .rule-fade {
+    height: 1px;
+    background: linear-gradient(
+      to right,
+      transparent,
+      rgb(var(--c-hairline)) 15%,
+      rgb(var(--c-hairline)) 85%,
+      transparent
+    );
+  }
+
+  /* Gradient text for accent numerals */
+  .text-accent-gradient {
+    background: linear-gradient(135deg, rgb(var(--c-accent-hover)), rgb(var(--c-accent)));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  /* Frosted glass panel */
+  .glass {
+    background-color: rgb(var(--c-surface) / 0.72);
+    backdrop-filter: blur(14px) saturate(140%);
+  }
+}
+
+/* ─── RainbowKit: nudge its button to match our scale ───────────────────────── */
+[data-rk] button {
+  font-family: var(--font-inter), ui-sans-serif, sans-serif !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }

@@ -30,6 +30,11 @@ import {Marketplace}       from "../src/core/Marketplace.sol";
 ///           MULTISIG_ADDRESS   – multisig that will act as proposer on the timelock
 ///           TIMELOCK_ADDRESS   – address of the already-deployed TimelockController
 ///                                (from DeployGovernance.s.sol)
+///           TREASURY_ADDRESS   – optional; receives marketplace protocol fees.
+///                                Defaults to TIMELOCK_ADDRESS. Never leave this as the
+///                                deployer EOA: the deployer renounces every role below,
+///                                so fees would keep flowing to a key with no governance
+///                                standing and only a timelock proposal could redirect them.
 contract DeployCore is Script {
 
     // Role constants — must match the values in each contract.
@@ -61,6 +66,8 @@ contract DeployCore is Script {
         address paymentToken     = vm.envAddress("PAYMENT_TOKEN");
         address multisig         = vm.envAddress("MULTISIG_ADDRESS");
         address timelockAddress  = vm.envAddress("TIMELOCK_ADDRESS");
+        // Fees accrue to governance by default rather than to the deploying EOA.
+        address treasury         = vm.envOr("TREASURY_ADDRESS", timelockAddress);
 
         vm.startBroadcast();
         address deployer = msg.sender;
@@ -103,7 +110,7 @@ contract DeployCore is Script {
 
         Marketplace market = Marketplace(address(new ERC1967Proxy(
             address(marketImpl),
-            abi.encodeCall(Marketplace.initialize, (deployer, address(registry), address(kyc), paymentToken, 50, deployer))
+            abi.encodeCall(Marketplace.initialize, (deployer, address(registry), address(kyc), paymentToken, 50, treasury))
         )));
 
         // Factory needs PROPERTY_ADMIN_ROLE to register token addresses
@@ -193,6 +200,7 @@ contract DeployCore is Script {
         console2.log("=== Governance ===");
         console2.log("TimelockController:", timelockAddress);
         console2.log("Multisig (proposer):", multisig);
+        console2.log("Fee treasury       :", treasury);
         console2.log("Payment token      :", paymentToken);
         console2.log("");
         console2.log("Deployer roles renounced. Timelock is sole admin.");

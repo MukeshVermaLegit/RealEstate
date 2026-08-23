@@ -89,9 +89,11 @@ export function useActiveListings(propertyId?: bigint): {
     [listingIds, addresses.marketplace],
   );
 
+  const listingsEnabled = (listingIds?.length ?? 0) > 0;
+
   const { data: listingData, isPending: listingsPending } = useReadContracts({
     contracts,
-    query: { enabled: (listingIds?.length ?? 0) > 0 },
+    query: { enabled: listingsEnabled },
   });
 
   // Watch for new listings and invalidate cache
@@ -144,7 +146,9 @@ export function useActiveListings(propertyId?: bigint): {
 
   return {
     listings,
-    isLoading: idsPending || listingsPending,
+    // A disabled query stays `pending`; with zero listing IDs there is nothing
+    // left to fetch, so don't report loading.
+    isLoading: idsPending || (listingsEnabled && listingsPending),
     refetch,
   };
 }

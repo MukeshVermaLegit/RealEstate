@@ -1,248 +1,313 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useAccount } from 'wagmi';
-import { ConnectButton } from '@rainbow-me/rainbowkit';
-import { formatUnits } from 'viem';
 import { usePropertyCount, useProperties } from '../../lib/hooks/useProperties';
 import { useActiveListings, type Listing } from '../../lib/hooks/useMarketplace';
 import { useKYCStatus } from '../../lib/hooks/useKYC';
+import { useIPFSMetadataMany } from '../../lib/hooks/useIPFSMetadata';
 import { ListingCard } from '../../components/ListingCard';
 import { BuyModal } from '../../components/BuyModal';
 import { CreateListingModal } from '../../components/CreateListingModal';
+import { formatNumber, formatUsd, formatUsdCompact, parseUsdTo18 } from '../../lib/format';
+import {
+  Badge,
+  Button,
+  Container,
+  EmptyState,
+  Field,
+  InputWithPrefix,
+  PageHeader,
+  Select,
+  Spinner,
+  StatCell,
+  StatRow,
+} from '../../components/ui';
 
-// ─── Filter / Sort types ─────────────────────────────────────────────────────
+type SortKey = 'newest' | 'price-asc' | 'price-desc';
 
-type SortKey = 'price-asc' | 'price-desc' | 'newest';
-
-const ZERO = '0x0000000000000000000000000000000000000000';
-
-// ─── Page ────────────────────────────────────────────────────────────────────
+const SORT_OPTIONS: { label: string; value: SortKey }[] = [
+  { label: 'Newest first',       value: 'newest' },
+  { label: 'Price: low to high', value: 'price-asc' },
+  { label: 'Price: high to low', value: 'price-desc' },
+];
 
 export default function MarketplacePage() {
   const { address, isConnected } = useAccount();
   const { isVerified } = useKYCStatus(isConnected ? address : undefined);
 
-  // All listings
   const { listings, isLoading, refetch } = useActiveListings();
 
-  // Property data for the filter dropdown
-  const { data: countData }         = usePropertyCount();
-  const count                       = Number(countData ?? 0n);
-  const { properties }              = useProperties(count);
+  const { data: countData } = usePropertyCount();
+  const count = Number(countData ?? 0n);
+  const { properties } = useProperties(count);
 
-  // Filter state
-  const [filterPropertyId, setFilterPropertyId] = useState<string>('all');
-  const [minPrice,         setMinPrice]          = useState('');
-  const [maxPrice,         setMaxPrice]          = useState('');
-  const [sortKey,          setSortKey]           = useState<SortKey>('newest');
+  const uris = useMemo(() => properties.map((p) => p.metadataURI), [properties]);
+  const { byUri } = useIPFSMetadataMany(uris);
 
-  // Modal state
-  const [buyTarget,        setBuyTarget]         = useState<Listing | null>(null);
-  const [showCreateModal,  setShowCreateModal]   = useState(false);
+  const [filterPropertyId, setFilterPropertyId] = useState('all');
+  const [minPrice, setMinPrice] = useState('');
+  const [maxPrice, setMaxPrice] = useState('');
+  const [sortKey, setSortKey] = useState<SortKey>('newest');
 
-  // Unique property IDs present in listings (for filter dropdown)
+  const [buyTarget, setBuyTarget] = useState<Listing | null>(null);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+
+  /** propertyId → { name, metadataURI } from the registry + IPFS. */
+  const propertyInfo = useMemo(() => {
+    const m: Record<string, { name: string; metadataURI: string }> = {};
+    for (const p of properties) {
+      const key = p.propertyId.toString();
+      m[key] = {
+        name: byUri[p.metadataURI]?.name || `Property #${key}`,
+        metadataURI: p.metadataURI,
+      };
+    }
+    return m;
+  }, [properties, byUri]);
+
   const listedPropertyIds = useMemo(
     () => [...new Set(listings.map((l) => l.propertyId.toString()))],
     [listings],
   );
 
-  // Property name helper
-  const propertyMap = useMemo(() => {
-    const m: Record<string, string> = {};
-    properties.forEach((p) => {
-      m[p.propertyId.toString()] = `Property #${p.propertyId}`;
-    });
-    return m;
-  }, [properties]);
-
-  // Filtered + sorted listings
   const displayed = useMemo(() => {
-    let result = [...listings];
+    const min = parseUsdTo18(minPrice);
+    const max = parseUsdTo18(maxPrice);
 
-    if (filterPropertyId !== 'all') {
-      result = result.filter((l) => l.propertyId.toString() === filterPropertyId);
-    }
-
-    if (minPrice) {
-      const min = parseFloat(minPrice);
-      result = result.filter(
-        (l) => parseFloat(formatUnits(l.pricePerToken, 18)) >= min,
-      );
-    }
-
-    if (maxPrice) {
-      const max = parseFloat(maxPrice);
-      result = result.filter(
-        (l) => parseFloat(formatUnits(l.pricePerToken, 18)) <= max,
-      );
-    }
+    const result = listings.filter((l) => {
+      if (filterPropertyId !== 'all' && l.propertyId.toString() !== filterPropertyId) return false;
+      if (min !== null && l.pricePerToken < min) return false;
+      if (max !== null && l.pricePerToken > max) return false;
+      return true;
+    });
 
     result.sort((a, b) => {
-      if (sortKey === 'price-asc')  return a.pricePerToken < b.pricePerToken ? -1 : 1;
+      if (sortKey === 'price-asc') return a.pricePerToken < b.pricePerToken ? -1 : 1;
       if (sortKey === 'price-desc') return a.pricePerToken > b.pricePerToken ? -1 : 1;
-      // newest
       return b.createdAt > a.createdAt ? 1 : -1;
     });
 
     return result;
   }, [listings, filterPropertyId, minPrice, maxPrice, sortKey]);
 
-  // Property metadataURI map
-  const metaURIMap = useMemo(() => {
-    const m: Record<string, string> = {};
-    properties.forEach((p) => { m[p.propertyId.toString()] = p.metadataURI; });
-    return m;
-  }, [properties]);
+  /** Order-book summary across everything currently listed. */
+  const summary = useMemo(() => {
+    if (listings.length === 0) return { notional: 0n, floor: 0n, tokens: 0n };
+    let notional = 0n;
+    let tokens = 0n;
+    let floor = listings[0].pricePerToken;
+    for (const l of listings) {
+      notional += (l.tokenAmount * l.pricePerToken) / 10n ** 18n;
+      tokens += l.tokenAmount;
+      if (l.pricePerToken < floor) floor = l.pricePerToken;
+    }
+    return { notional, floor, tokens };
+  }, [listings]);
 
-  const handleBuySuccess = () => {
-    setBuyTarget(null);
-    refetch();
-  };
+  const hasFilters = filterPropertyId !== 'all' || Boolean(minPrice) || Boolean(maxPrice);
 
-  const handleCreateSuccess = () => {
-    setShowCreateModal(false);
-    refetch();
+  const resetFilters = () => {
+    setFilterPropertyId('all');
+    setMinPrice('');
+    setMaxPrice('');
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-6 py-10">
-      {/* Page header */}
-      <div className="flex flex-wrap items-center justify-between gap-4 mb-8">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900">Marketplace</h1>
-          <p className="mt-1 text-sm text-gray-500">
-            Buy and sell fractional property tokens P2P.
-          </p>
-        </div>
-
-        {isConnected ? (
-          isVerified ? (
-            <button
-              onClick={() => setShowCreateModal(true)}
-              className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 transition-colors"
-            >
-              + Create Listing
-            </button>
+    <>
+      <PageHeader
+        title="Secondary market"
+        description="Peer-to-peer trading of fractional property tokens. Settlement is restricted to wallets that pass the on-chain compliance check."
+        action={
+          isConnected ? (
+            isVerified ? (
+              <Button onClick={() => setShowCreateModal(true)}>
+                <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+                  <path d="M10 4v12M4 10h12" strokeLinecap="round" />
+                </svg>
+                List tokens
+              </Button>
+            ) : (
+              <Badge tone="warn" dot>
+                KYC required to list
+              </Badge>
+            )
           ) : (
-            <span className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2 text-xs font-semibold text-amber-700">
-              KYC required to create listings
-            </span>
+            // The navbar already owns the connect action — don't stack a second one here.
+            <Badge tone="neutral" dot>
+              Connect a wallet to list tokens
+            </Badge>
           )
-        ) : (
-          <ConnectButton />
-        )}
-      </div>
+        }
+      />
 
-      {/* Filter bar */}
-      <div className="flex flex-wrap gap-3 mb-6 rounded-2xl border border-gray-100 bg-white px-5 py-4 shadow-sm">
-        {/* Property filter */}
-        <div className="flex flex-col gap-1 min-w-[180px]">
-          <label className="text-xs font-semibold text-gray-500">Property</label>
-          <select
-            value={filterPropertyId}
-            onChange={(e) => setFilterPropertyId(e.target.value)}
-            className="rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-          >
-            <option value="all">All Properties</option>
-            {listedPropertyIds.map((id) => (
-              <option key={id} value={id}>
-                {propertyMap[id] ?? `Property #${id}`}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {/* Min price */}
-        <div className="flex flex-col gap-1 w-32">
-          <label className="text-xs font-semibold text-gray-500">Min Price ($)</label>
-          <input
-            type="number"
-            min="0"
-            step="any"
-            value={minPrice}
-            onChange={(e) => setMinPrice(e.target.value)}
-            placeholder="0"
-            className="rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+      <Container className="py-8 sm:py-10">
+        {/* Order-book summary */}
+        <StatRow className="grid-cols-2 lg:grid-cols-4">
+          <StatCell label="Active listings" value={formatNumber(listings.length)} loading={isLoading} />
+          <StatCell
+            label="Notional offered"
+            value={formatUsdCompact(summary.notional)}
+            sub="Sum of listing totals"
+            loading={isLoading}
+            accent
           />
-        </div>
-
-        {/* Max price */}
-        <div className="flex flex-col gap-1 w-32">
-          <label className="text-xs font-semibold text-gray-500">Max Price ($)</label>
-          <input
-            type="number"
-            min="0"
-            step="any"
-            value={maxPrice}
-            onChange={(e) => setMaxPrice(e.target.value)}
-            placeholder="∞"
-            className="rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          <StatCell
+            label="Lowest ask"
+            value={listings.length ? formatUsd(summary.floor) : '—'}
+            sub="Per token"
+            loading={isLoading}
           />
+          <StatCell
+            label="Properties listed"
+            value={formatNumber(listedPropertyIds.length)}
+            loading={isLoading}
+          />
+        </StatRow>
+
+        {/* Filters */}
+        <div className="mt-6 rounded-2xl border border-hairline bg-surface p-4 shadow-card sm:p-5">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <Field label="Property" htmlFor="mkt-property">
+              <Select
+                id="mkt-property"
+                value={filterPropertyId}
+                onChange={(e) => setFilterPropertyId(e.target.value)}
+              >
+                <option value="all">All properties</option>
+                {listedPropertyIds.map((id) => (
+                  <option key={id} value={id}>
+                    {propertyInfo[id]?.name ?? `Property #${id}`}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+
+            <Field label="Min price" htmlFor="mkt-min">
+              <InputWithPrefix
+                id="mkt-min"
+                prefix="$"
+                type="number"
+                min="0"
+                step="any"
+                value={minPrice}
+                onChange={(e) => setMinPrice(e.target.value)}
+                placeholder="0"
+              />
+            </Field>
+
+            <Field label="Max price" htmlFor="mkt-max">
+              <InputWithPrefix
+                id="mkt-max"
+                prefix="$"
+                type="number"
+                min="0"
+                step="any"
+                value={maxPrice}
+                onChange={(e) => setMaxPrice(e.target.value)}
+                placeholder="Any"
+              />
+            </Field>
+
+            <Field label="Sort by" htmlFor="mkt-sort">
+              <Select
+                id="mkt-sort"
+                value={sortKey}
+                onChange={(e) => setSortKey(e.target.value as SortKey)}
+              >
+                {SORT_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          </div>
         </div>
 
-        {/* Sort */}
-        <div className="flex flex-col gap-1 min-w-[160px] ml-auto">
-          <label className="text-xs font-semibold text-gray-500">Sort</label>
-          <select
-            value={sortKey}
-            onChange={(e) => setSortKey(e.target.value as SortKey)}
-            className="rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-          >
-            <option value="newest">Newest First</option>
-            <option value="price-asc">Price: Low → High</option>
-            <option value="price-desc">Price: High → Low</option>
-          </select>
-        </div>
-      </div>
-
-      {/* Listing grid */}
-      {isLoading ? (
-        <div className="flex items-center justify-center py-24 text-sm text-gray-400 gap-2">
-          <span className="h-5 w-5 rounded-full border-2 border-gray-300 border-t-indigo-500 animate-spin" />
-          Loading listings…
-        </div>
-      ) : displayed.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-24 rounded-2xl border border-dashed border-gray-200 bg-white gap-3">
-          <p className="text-gray-400 text-sm">No active listings match your filters.</p>
-          {isConnected && isVerified && (
-            <button
-              onClick={() => setShowCreateModal(true)}
-              className="text-indigo-600 text-sm font-semibold hover:underline"
-            >
-              Create the first one →
-            </button>
+        {/* Result meta */}
+        <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-muted">
+            {isLoading ? (
+              'Scanning the marketplace…'
+            ) : (
+              <>
+                <span className="tabular font-medium text-ink">{formatNumber(displayed.length)}</span>
+                {' of '}
+                <span className="tabular">{formatNumber(listings.length)}</span>
+                {' listings'}
+              </>
+            )}
+          </p>
+          {hasFilters && (
+            <Button variant="ghost" size="sm" onClick={resetFilters}>
+              Clear filters
+            </Button>
           )}
         </div>
-      ) : (
-        <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {displayed.map((listing) => (
-            <ListingCard
-              key={listing.listingId.toString()}
-              listing={listing}
-              metadataURI={metaURIMap[listing.propertyId.toString()]}
-              onBuy={(l) => setBuyTarget(l)}
-              onCancelled={refetch}
-            />
-          ))}
-        </div>
-      )}
 
-      {/* Modals */}
+        {/* Grid */}
+        <div className="mt-5">
+          {isLoading ? (
+            <div className="flex items-center justify-center gap-2 py-24 text-sm text-muted">
+              <Spinner /> Loading listings…
+            </div>
+          ) : displayed.length === 0 ? (
+            <EmptyState
+              title={listings.length === 0 ? 'No active listings' : 'Nothing matches those filters'}
+              description={
+                listings.length === 0
+                  ? 'Holders can list tokens here once their lockup has expired.'
+                  : 'Try widening the price range or selecting all properties.'
+              }
+              action={
+                hasFilters ? (
+                  <Button variant="secondary" size="sm" onClick={resetFilters}>
+                    Clear filters
+                  </Button>
+                ) : isConnected && isVerified ? (
+                  <Button size="sm" onClick={() => setShowCreateModal(true)}>
+                    Create the first listing
+                  </Button>
+                ) : undefined
+              }
+            />
+          ) : (
+            <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {displayed.map((listing) => (
+                <ListingCard
+                  key={listing.listingId.toString()}
+                  listing={listing}
+                  metadataURI={propertyInfo[listing.propertyId.toString()]?.metadataURI}
+                  onBuy={setBuyTarget}
+                  onCancelled={refetch}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      </Container>
+
       {buyTarget && (
         <BuyModal
           listing={buyTarget}
           onClose={() => setBuyTarget(null)}
-          onSuccess={handleBuySuccess}
+          onSuccess={() => {
+            setBuyTarget(null);
+            refetch();
+          }}
         />
       )}
 
       {showCreateModal && (
         <CreateListingModal
           onClose={() => setShowCreateModal(false)}
-          onSuccess={handleCreateSuccess}
+          onSuccess={() => {
+            setShowCreateModal(false);
+            refetch();
+          }}
         />
       )}
-    </div>
+    </>
   );
 }

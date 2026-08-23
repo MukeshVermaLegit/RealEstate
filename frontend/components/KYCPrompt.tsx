@@ -2,8 +2,9 @@
 
 import { useAccount } from 'wagmi';
 import { useKYCStatus } from '../lib/hooks/useKYC';
-
-const KYC_PROVIDER_URL = process.env.NEXT_PUBLIC_KYC_PROVIDER_URL ?? '#';
+import { Alert, Button, Card, CardBody } from './ui';
+import { SelfVerifyButton } from './SelfVerifyButton';
+import { shortAddress } from '../lib/format';
 
 export function KYCPrompt() {
   const { address } = useAccount();
@@ -11,70 +12,58 @@ export function KYCPrompt() {
 
   const now = BigInt(Math.floor(Date.now() / 1000));
 
-  // Determine alert variant and message
-  let alertVariant: 'red' | 'orange' | 'yellow' = 'yellow';
-  let message = 'You need to complete KYC to invest.';
+  let tone: 'negative' | 'warn' = 'warn';
+  let title = 'Verification required';
+  let message =
+    'Your wallet is not yet in the on-chain identity registry. Complete KYC to invest, hold, or trade property tokens.';
 
   if (record?.frozen) {
-    alertVariant = 'red';
-    message = 'Your account has been frozen. Contact support.';
+    tone = 'negative';
+    title = 'Wallet frozen';
+    message =
+      'This wallet has been frozen by the compliance operator. Transfers and claims are blocked until it is reinstated.';
   } else if (record?.verified && record.expiresAt > 0n && now > record.expiresAt) {
-    alertVariant = 'orange';
-    message = 'Your KYC has expired. Re-verify.';
+    tone = 'warn';
+    title = 'Verification expired';
+    message =
+      'Your KYC record has passed its expiry date. Re-verify to restore access to investing and trading.';
   }
 
-  const alertClasses = {
-    red:    'bg-red-50 border-red-200 text-red-800',
-    orange: 'bg-orange-50 border-orange-200 text-orange-800',
-    yellow: 'bg-yellow-50 border-yellow-200 text-yellow-800',
-  } as const;
-
-  const dotClasses = {
-    red:    'bg-red-400',
-    orange: 'bg-orange-400',
-    yellow: 'bg-yellow-400',
-  } as const;
-
   return (
-    <div className="max-w-md mx-auto mt-8 rounded-2xl border border-gray-200 bg-white shadow-sm p-6">
-      <div className="flex items-center gap-3 mb-4">
-        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-indigo-100 text-indigo-600 text-xl">
-          🪪
+    <Card className="mx-auto max-w-md">
+      <CardBody className="p-6">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-accent/25 bg-accent/10 text-accent">
+            <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+              <rect x="3" y="5" width="18" height="14" rx="2" />
+              <circle cx="9" cy="11" r="2" />
+              <path d="M5.5 16.5c.8-1.5 2-2.2 3.5-2.2s2.7.7 3.5 2.2M15 10h4M15 13.5h3" strokeLinecap="round" />
+            </svg>
+          </div>
+          <div className="min-w-0">
+            <h2 className="font-display text-base font-semibold text-ink">Identity verification</h2>
+            {address && (
+              <p className="mt-0.5 font-mono text-xs text-faint">{shortAddress(address, 6)}</p>
+            )}
+          </div>
         </div>
-        <h2 className="text-lg font-semibold text-gray-900">Identity Verification Required</h2>
-      </div>
 
-      {/* Status alert */}
-      <div
-        className={`flex items-start gap-2 rounded-lg border px-4 py-3 mb-5 text-sm ${alertClasses[alertVariant]}`}
-      >
-        <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${dotClasses[alertVariant]}`} />
-        <p>{isLoading ? 'Checking KYC status…' : message}</p>
-      </div>
+        <Alert tone={tone} title={title} className="mt-5">
+          {isLoading ? 'Reading your KYC record from the registry…' : message}
+        </Alert>
 
-      {/* CTA buttons */}
-      <div className="flex flex-col gap-3">
-        <a
-          href={KYC_PROVIDER_URL}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center justify-center rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 transition-colors"
-        >
-          Start Verification
-        </a>
-        <button
-          onClick={() => void refetch()}
-          disabled={isLoading}
-          className="inline-flex items-center justify-center rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50"
-        >
-          {isLoading ? 'Checking…' : 'Check Status'}
-        </button>
-      </div>
+        <div className="mt-5 flex flex-col gap-2.5">
+          <SelfVerifyButton onVerified={() => void refetch()} />
+          <Button variant="secondary" fullWidth loading={isLoading} onClick={() => void refetch()}>
+            Re-check status
+          </Button>
+        </div>
 
-      {/* Footnote */}
-      <p className="mt-4 text-xs text-gray-400 text-center">
-        After completing verification, your wallet will be whitelisted within 24 hours by our compliance team.
-      </p>
-    </div>
+        <p className="mt-4 text-center text-[11px] leading-relaxed text-faint">
+          Once verification completes, the compliance team writes your wallet into the identity
+          registry. Approval typically lands within 24 hours.
+        </p>
+      </CardBody>
+    </Card>
   );
 }

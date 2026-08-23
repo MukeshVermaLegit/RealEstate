@@ -5,6 +5,7 @@ import { useAccount } from 'wagmi';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useKYCStatus } from '../lib/hooks/useKYC';
 import { KYCPrompt } from './KYCPrompt';
+import { EmptyState, Spinner } from './ui';
 
 interface KYCGateProps {
   children: ReactNode;
@@ -15,30 +16,27 @@ export function KYCGate({ children, fallback }: KYCGateProps) {
   const { address, isConnected } = useAccount();
   const { isVerified, isLoading } = useKYCStatus(isConnected ? address : undefined);
 
-  // Wallet not connected
   if (!isConnected) {
     return (
-      <div className="flex flex-col items-center gap-4 py-12">
-        <p className="text-sm text-gray-500">Connect your wallet to continue.</p>
-        <ConnectButton />
-      </div>
+      <EmptyState
+        title="Connect your wallet"
+        description="This area is gated by the on-chain identity registry, so a connected wallet is required."
+        action={<ConnectButton />}
+      />
     );
   }
 
-  // Still fetching
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center py-12 text-sm text-gray-400">
-        Checking KYC status…
+      <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted">
+        <Spinner /> Checking KYC status…
       </div>
     );
   }
 
-  // Connected but not verified
   if (!isVerified) {
     return fallback ? <>{fallback}</> : <KYCPrompt />;
   }
 
-  // Verified — render protected content
   return <>{children}</>;
 }

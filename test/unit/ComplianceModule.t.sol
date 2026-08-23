@@ -11,7 +11,8 @@ import {PropertyToken} from "../../src/core/PropertyToken.sol";
 import {IComplianceModule} from "../../src/interfaces/IComplianceModule.sol";
 import {
     ComplianceModule__TokenNotRegistered,
-    ComplianceModule__TokenAlreadyRegistered
+    ComplianceModule__TokenAlreadyRegistered,
+    ComplianceModule__TransferDenied
 } from "../../src/utils/Errors.sol";
 import {TokenComplianceAdded, TokenComplianceUpdated, HolderCountUpdated} from "../../src/utils/Events.sol";
 
@@ -193,16 +194,6 @@ contract ComplianceModuleTest is Test {
     }
 
     function test_maxHolders_blocksWhenExceeded() public {
-        _addRules(Rules.maxHolders(2));
-        _mint(alice, 100 ether);
-        _mint(bob,   100 ether);
-
-        // carol would be the 3rd holder
-        _mint(carol, 50 ether); // mint bypasses KYC/compliance checks
-
-        // direct canTransfer check: alice → carol would exceed if carol is already a holder from mint
-        // Let's test transfer from bob to carol where carol is a new holder via transfer
-        // Reset: use a fresh token with compliance for clarity
         vm.startPrank(admin);
         PropertyToken token2 = new PropertyToken("T2","T2", 2, MAX_SUPPLY, admin, address(kyc), address(compliance));
         compliance.addTokenCompliance(address(token2), Rules.maxHolders(2));
@@ -212,10 +203,58 @@ contract ComplianceModuleTest is Test {
 
         assertEq(compliance.holderCount(address(token2)), 2);
 
-        // Transfer alice → carol (new holder): should be blocked
+        // Transfer alice → carol (a new, third holder) is blocked
         (bool ok, string memory reason) = compliance.canTransfer(address(token2), alice, carol, 50 ether);
         assertFalse(ok);
         assertEq(reason, "max holders exceeded");
+    }
+
+    /// @dev Primary issuance is how most tokens enter circulation. Mint used to skip the
+    ///      rule engine entirely, leaving maxHolders unenforced on the main path.
+    function test_maxHolders_enforcedOnMint() public {
+        vm.startPrank(admin);
+        PropertyToken token2 = new PropertyToken("T3","T3", 3, MAX_SUPPLY, admin, address(kyc), address(compliance));
+        compliance.addTokenCompliance(address(token2), Rules.maxHolders(2));
+        token2.mint(alice, 100 ether);
+        token2.mint(bob,   100 ether);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(ComplianceModule__TransferDenied.selector, "max holders exceeded")
+        );
+        token2.mint(carol, 50 ether);
+        vm.stopPrank();
+
+        assertEq(compliance.holderCount(address(token2)), 2);
+    }
+
+    /// @dev Same gap for the per-wallet cap.
+    function test_maxTokensPerHolder_enforcedOnMint() public {
+        vm.startPrank(admin);
+        PropertyToken token2 = new PropertyToken("T4","T4", 4, MAX_SUPPLY, admin, address(kyc), address(compliance));
+        compliance.addTokenCompliance(address(token2), Rules.maxPerHolder(100 ether));
+
+        token2.mint(alice, 100 ether); // exactly at the cap — allowed
+
+        vm.expectRevert(
+            abi.encodeWithSelector(ComplianceModule__TransferDenied.selector, "exceeds per-holder token cap")
+        );
+        token2.mint(alice, 1); // one wei over — rejected
+        vm.stopPrank();
+
+        assertEq(token2.balanceOf(alice), 100 ether);
+    }
+
+    /// @dev Burns must stay unrestricted — they reduce exposure, never increase it.
+    function test_burn_notRuleChecked() public {
+        vm.startPrank(admin);
+        PropertyToken token2 = new PropertyToken("T5","T5", 5, MAX_SUPPLY, admin, address(kyc), address(compliance));
+        compliance.addTokenCompliance(address(token2), Rules.maxHolders(1));
+        token2.mint(alice, 100 ether);
+        token2.burn(alice, 100 ether);
+        vm.stopPrank();
+
+        assertEq(token2.balanceOf(alice), 0);
+        assertEq(compliance.holderCount(address(token2)), 0);
     }
 
     function test_maxHolders_allowsIfSenderExits() public {
@@ -311,14 +350,15 @@ contract ComplianceModuleTest is Test {
     }
 
     function test_blockedCountry_preventsSender() public {
+        // Seed first: mints are rule-checked now, so a blocked-country mint would revert.
+        _mint(dave, 100 ether);
+
         // Register dave (CC_DEU) as blocked sender
         uint16[] memory blocked = new uint16[](1);
         blocked[0] = CC_DEU;
         IComplianceModule.ComplianceRules memory r;
         r.blockedCountries = blocked;
         _addRules(r);
-
-        _mint(dave, 100 ether);
 
         (bool ok, string memory reason) = compliance.canTransfer(address(token), dave, alice, 10 ether);
         assertFalse(ok);
@@ -370,13 +410,15 @@ contract ComplianceModuleTest is Test {
     }
 
     function test_allowedCountries_blocksSenderNotInList() public {
+        // Seed dave's balance BEFORE the rule set exists — compliance now covers mints, so
+        // minting to a disallowed country under an active rule set would (correctly) revert.
+        _mint(dave, 100 ether); // dave CC_DEU
+
         uint16[] memory allowed = new uint16[](1);
         allowed[0] = CC_USA;
         IComplianceModule.ComplianceRules memory r;
         r.allowedCountries = allowed;
         _addRules(r);
-
-        _mint(dave, 100 ether); // dave CC_DEU, minted via admin bypass
 
         (bool ok, string memory reason) = compliance.canTransfer(address(token), dave, alice, 10 ether);
         assertFalse(ok);

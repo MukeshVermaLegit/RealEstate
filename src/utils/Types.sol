@@ -78,6 +78,7 @@ library Types {
         bytes32 merkleRoot;      // root of the (address, claimableAmount) Merkle tree
         address depositor;       // address that originally deposited the rent
         uint256 reclaimDeadline; // timestamp after which admin may reclaim unclaimed funds
-        uint256 snapshotBlock;   // block at which token balances were snapshotted (0 = no enforcement)
+        uint256 snapshotBlock;   // block at which token balances were snapshotted (always non-zero)
+        bool    reclaimed;       // true once the admin has swept the unclaimed remainder
     }
 }

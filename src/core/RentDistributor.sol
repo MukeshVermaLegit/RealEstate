@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {MerkleProof} from "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
 import {IVotes} from "@openzeppelin/contracts/governance/utils/IVotes.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
@@ -23,7 +24,12 @@ import {
     RentDistributor__ExceedsTotalRent,
     RentDistributor__ArrayLengthMismatch,
     RentDistributor__InvalidSnapshotBlock,
-    RentDistributor__ExceedsEntitlement
+    RentDistributor__ExceedsEntitlement,
+    RentDistributor__NothingToReclaim,
+    RentDistributor__ZeroMerkleRoot,
+    RentDistributor__NoTokenForProperty,
+    RentDistributor__EmptySnapshot,
+    RentDistributor__PeriodReclaimed
 } from "../utils/Errors.sol";
 
 /// @title RentDistributor
@@ -36,7 +42,21 @@ import {
 ///         - Proof forgery is computationally infeasible (Merkle tree security).
 ///         - Double-claim prevented by per-account claimed flag.
 ///         - Over-distribution prevented by totalClaimed <= totalRent invariant.
-///         - Unclaimed funds recoverable by admin after reclaimDeadline.
+///         - Per-claimant over-allocation prevented by an on-chain pro-rata cap read from
+///           the property token's vote checkpoints at `snapshotBlock`.
+///         - Unclaimed funds recoverable by admin after reclaimDeadline (once only).
+///
+///         SNAPSHOT IS MANDATORY. `depositRent` requires a non-zero `snapshotBlock` that
+///         is strictly in the past AND resolves to a non-empty checkpoint on a registered
+///         property token. Previously a depositor could pass 0 — or a block predating the
+///         token — and silently disable the entitlement cap they are meant to be bound by.
+///
+///         ALLOCATOR CONTRACT. The on-chain cap is
+///             maxEntitlement = ceil(pastVotes * totalRent / pastTotalSupply)
+///         so the off-chain tree MUST distribute the rounding remainder one wei at a time
+///         across holders (largest-remainder method). An allocator that dumps the whole
+///         remainder onto a single holder will exceed that holder's cap and their claim
+///         will revert.
 contract RentDistributor is IRentDistributor, Initializable, AccessControl, ReentrancyGuard, UUPSUpgradeable {
     using SafeERC20 for IERC20;
 
@@ -77,13 +97,22 @@ contract RentDistributor is IRentDistributor, Initializable, AccessControl, Reen
         uint256 snapshotBlock
     ) external nonReentrant returns (uint256 periodId) {
         if (amount == 0) revert RentDistributor__ZeroRent();
-        // snapshotBlock == 0 means "no enforcement"; non-zero must be a past block
-        if (snapshotBlock > 0 && snapshotBlock >= block.number) {
+        if (merkleRoot == bytes32(0)) revert RentDistributor__ZeroMerkleRoot();
+        // The snapshot is a hard requirement and must be strictly in the past.
+        if (snapshotBlock == 0 || snapshotBlock >= block.number) {
             revert RentDistributor__InvalidSnapshotBlock(snapshotBlock);
         }
 
         Types.Property memory prop = registry.getProperty(propertyId);
         if (prop.owner != msg.sender) revert RentDistributor__NotPropertyOwner(propertyId);
+
+        // The snapshot must resolve against a real, non-empty checkpoint — otherwise the
+        // entitlement cap in _claim() would silently evaluate to "no limit".
+        address tokenAddr = registry.getPropertyToken(propertyId);
+        if (tokenAddr == address(0)) revert RentDistributor__NoTokenForProperty(propertyId);
+        if (IVotes(tokenAddr).getPastTotalSupply(snapshotBlock) == 0) {
+            revert RentDistributor__EmptySnapshot(snapshotBlock);
+        }
 
         periodId = ++_nextPeriodId[propertyId];
 
@@ -94,7 +123,8 @@ contract RentDistributor is IRentDistributor, Initializable, AccessControl, Reen
             merkleRoot:      merkleRoot,
             depositor:       msg.sender,
             reclaimDeadline: block.timestamp + RECLAIM_DELAY,
-            snapshotBlock:   snapshotBlock
+            snapshotBlock:   snapshotBlock,
+            reclaimed:       false
         });
 
         paymentToken.safeTransferFrom(msg.sender, address(this), amount);
@@ -134,14 +164,16 @@ contract RentDistributor is IRentDistributor, Initializable, AccessControl, Reen
         if (block.timestamp < period.reclaimDeadline) {
             revert RentDistributor__ReclaimTooEarly(propertyId, periodId, period.reclaimDeadline);
         }
+        if (period.reclaimed) revert RentDistributor__PeriodReclaimed(propertyId, periodId);
 
         uint256 unclaimed = period.totalRent - period.totalClaimed;
-        // Mark fully claimed to prevent double reclaim
+        if (unclaimed == 0) revert RentDistributor__NothingToReclaim(propertyId, periodId);
+
+        // Flag the period and mark it fully claimed so no further claims can be paid.
+        period.reclaimed    = true;
         period.totalClaimed = period.totalRent;
 
-        if (unclaimed > 0) {
-            paymentToken.safeTransfer(period.depositor, unclaimed);
-        }
+        paymentToken.safeTransfer(period.depositor, unclaimed);
         emit UnclaimedRentReclaimed(propertyId, periodId, unclaimed);
     }
 
@@ -158,6 +190,8 @@ contract RentDistributor is IRentDistributor, Initializable, AccessControl, Reen
         if (_hasClaimed[propertyId][periodId][msg.sender]) {
             revert RentDistributor__AlreadyClaimed(propertyId, periodId, msg.sender);
         }
+        // Distinguish "swept by admin" from a generic over-cap failure.
+        if (period.reclaimed) revert RentDistributor__PeriodReclaimed(propertyId, periodId);
 
         // Verify Merkle proof: leaf = keccak256(abi.encodePacked(claimant, amount))
         bytes32 leaf = keccak256(abi.encodePacked(msg.sender, claimableAmount));
@@ -165,21 +199,23 @@ contract RentDistributor is IRentDistributor, Initializable, AccessControl, Reen
             revert RentDistributor__InvalidProof();
         }
 
-        // On-chain snapshot entitlement check — prevents off-chain Merkle root from
-        // over-allocating relative to what the investor actually held at the snapshot block.
-        if (period.snapshotBlock > 0) {
+        // On-chain snapshot entitlement check — prevents the off-chain Merkle root from
+        // over-allocating relative to what the investor actually held at snapshotBlock.
+        // depositRent() guarantees the token exists and the snapshot is non-empty, so this
+        // cap always applies and cannot be side-stepped by the depositor.
+        // Rounded UP so an allocator using the largest-remainder method (which must hand out
+        // the truncation dust one wei at a time) stays within every holder's cap.
+        {
             address tokenAddr = registry.getPropertyToken(propertyId);
-            if (tokenAddr != address(0)) {
-                uint256 pastTotalSupply = IVotes(tokenAddr).getPastTotalSupply(period.snapshotBlock);
-                if (pastTotalSupply > 0) {
-                    uint256 pastVotes = IVotes(tokenAddr).getPastVotes(msg.sender, period.snapshotBlock);
-                    uint256 maxEntitlement = (pastVotes * period.totalRent) / pastTotalSupply;
-                    if (claimableAmount > maxEntitlement) {
-                        revert RentDistributor__ExceedsEntitlement(
-                            propertyId, periodId, msg.sender, claimableAmount, maxEntitlement
-                        );
-                    }
-                }
+            uint256 pastTotalSupply = IVotes(tokenAddr).getPastTotalSupply(period.snapshotBlock);
+            uint256 pastVotes      = IVotes(tokenAddr).getPastVotes(msg.sender, period.snapshotBlock);
+            uint256 maxEntitlement = Math.mulDiv(
+                pastVotes, period.totalRent, pastTotalSupply, Math.Rounding.Ceil
+            );
+            if (claimableAmount > maxEntitlement) {
+                revert RentDistributor__ExceedsEntitlement(
+                    propertyId, periodId, msg.sender, claimableAmount, maxEntitlement
+                );
             }
         }
 

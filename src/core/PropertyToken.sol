@@ -23,6 +23,12 @@ import {KYCRegistry__NotVerified} from "../utils/Errors.sol";
 /// @title PropertyToken
 /// @notice Per-property ERC-20 token with ERC20Votes checkpoints for trustless rent distribution.
 ///         Transfers are restricted to KYC-verified addresses only (except mint/burn/forcedTransfer).
+///
+///         Every holder is auto-delegated to themselves on first receipt so that
+///         `getPastVotes()` is a faithful balance snapshot. Without this, RentDistributor's
+///         pro-rata entitlement check reads 0 for anyone who never called `delegate()`
+///         and every rent claim reverts. Auto-delegation keeps the invariant
+///         `sum(getPastVotes) == getPastTotalSupply` at every block.
 contract PropertyToken is IPropertyToken, ERC20, ERC20Permit, ERC20Votes, AccessControl, Pausable {
     bytes32 public constant MINTER_ROLE = keccak256("MINTER_ROLE");
     bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
@@ -90,16 +96,25 @@ contract PropertyToken is IPropertyToken, ERC20, ERC20Permit, ERC20Votes, Access
         if (amount == 0) revert PropertyToken__ZeroAmount();
         _bypassKyc = true;
         _transfer(from, to, amount);
-        _bypassKyc = false;
+        _bypassKyc = false; // defensive: _update already consumed it
         emit ForcedTransfer(from, to, amount, _propertyId);
     }
 
     /// @inheritdoc IPropertyToken
+    /// @dev Mirrors every guard applied by `_update` for a normal transfer, so a caller
+    ///      that gets (true, "") here will not be reverted by the transfer guard.
     function canTransfer(address from, address to, uint256 amount) external view override returns (bool ok, string memory reason) {
         if (paused()) return (false, "paused");
+        if (from == address(0) || to == address(0)) return (false, "zero address");
         if (balanceOf(from) < amount) return (false, "insufficient balance");
         if (!kycRegistry.isVerified(from)) return (false, "sender not KYC verified");
         if (!kycRegistry.isVerified(to)) return (false, "recipient not KYC verified");
+        uint256 expiry = _lockupExpiry[from];
+        if (expiry > 0 && block.timestamp < expiry) return (false, "sender tokens locked");
+        if (address(complianceModule) != address(0)) {
+            (bool compliant, string memory why) = complianceModule.canTransfer(address(this), from, to, amount);
+            if (!compliant) return (false, why);
+        }
         return (true, "");
     }
 
@@ -123,23 +138,43 @@ contract PropertyToken is IPropertyToken, ERC20, ERC20Permit, ERC20Votes, Access
 
     // ─── Transfer guard ──────────────────────────────────────────────────────
 
-    /// @dev KYC, lockup, and compliance checks on normal transfers; skipped for mint (from==0),
-    ///      burn (to==0), and forcedTransfer. ComplianceModule.transferred() is always called
-    ///      after the state update (if set) so holder counts remain accurate for mints/burns too.
+    /// @dev Guard ordering:
+    ///        - KYC + pause + lockup   → normal transfers only (from != 0 && to != 0)
+    ///        - ComplianceModule rules → mints AND normal transfers (any to != 0), because
+    ///          primary issuance is how most tokens enter circulation; skipping it there
+    ///          would leave maxHolders / maxTokensPerHolder unenforced on the main path.
+    ///        - Burns (to == 0) are never rule-checked; forcedTransfer bypasses all guards.
+    ///      ComplianceModule.transferred() is called after the state change for every
+    ///      operation so holder counts stay accurate for mints and burns too.
     function _update(address from, address to, uint256 amount) internal override(ERC20, ERC20Votes) {
-        // Normal transfer (not mint, not burn, not forcedTransfer): run all guards
-        if (from != address(0) && to != address(0) && !_bypassKyc) {
-            _requireNotPaused();
-            if (!kycRegistry.isVerified(from)) revert KYCRegistry__NotVerified(from);
-            if (!kycRegistry.isVerified(to)) revert KYCRegistry__NotVerified(to);
-            uint256 expiry = _lockupExpiry[from];
-            if (expiry > 0 && block.timestamp < expiry) revert PropertyToken__TransferLocked(from, expiry);
-            if (address(complianceModule) != address(0)) {
+        // Consume the forcedTransfer flag before any external call is made below, so a
+        // compromised ComplianceModule can never re-enter while guards are disabled.
+        bool bypass = _bypassKyc;
+        if (bypass) _bypassKyc = false;
+
+        if (!bypass) {
+            if (from != address(0) && to != address(0)) {
+                _requireNotPaused();
+                if (!kycRegistry.isVerified(from)) revert KYCRegistry__NotVerified(from);
+                if (!kycRegistry.isVerified(to)) revert KYCRegistry__NotVerified(to);
+                uint256 expiry = _lockupExpiry[from];
+                if (expiry > 0 && block.timestamp < expiry) revert PropertyToken__TransferLocked(from, expiry);
+            }
+            // Compliance rules cover issuance (from == 0) as well as transfers.
+            if (to != address(0) && address(complianceModule) != address(0)) {
                 (bool ok, string memory reason) = complianceModule.canTransfer(address(this), from, to, amount);
                 if (!ok) revert ComplianceModule__TransferDenied(reason);
             }
         }
+
         super._update(from, to, amount);
+
+        // Self-delegate on first receipt so voting-unit checkpoints track balances.
+        // Cheap no-op once set; only new holders pay the one-time checkpoint write.
+        if (to != address(0) && delegates(to) == address(0)) {
+            _delegate(to, to);
+        }
+
         // Notify compliance module after state change so it can maintain accurate holder counts.
         // Called for all operations (mint, burn, transfer) when module is set.
         if (address(complianceModule) != address(0)) {

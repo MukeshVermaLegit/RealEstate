@@ -193,3 +193,49 @@ export function useInvest(offeringAddress: `0x${string}` | undefined) {
     error,
   };
 }
+
+// ─── Claiming issued tokens ───────────────────────────────────────────────────
+
+/**
+ * Whether this investor has already pulled their allocation.
+ *
+ * `invest()` only escrows payment — tokens are minted when the investor calls
+ * `claimTokens()` after finalization. Until then the position exists purely as a
+ * claim on the offering, and nothing shows up in the wallet.
+ */
+export function useHasClaimedTokens(
+  offeringAddress: `0x${string}` | undefined,
+  account: `0x${string}` | undefined,
+) {
+  const enabled = !!offeringAddress && !!account;
+  const { data, isPending, refetch } = useReadContract({
+    address: offeringAddress!,
+    abi: PropertyOfferingABI,
+    functionName: 'hasClaimedTokens',
+    args: [account!],
+    query: { enabled },
+  });
+  return {
+    hasClaimed: (data as boolean | undefined) ?? false,
+    isPending: enabled && isPending,
+    refetch: () => void refetch(),
+  };
+}
+
+/** Mints the caller's allocation to their own wallet. Only valid once finalized. */
+export function useClaimTokens(offeringAddress: `0x${string}` | undefined) {
+  const { writeContractAsync, data: txHash, isPending, error } = useWriteContract();
+  const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash: txHash });
+
+  const claim = useCallback(() => {
+    if (!offeringAddress) throw new Error('No offering address');
+    return writeContractAsync({
+      address: offeringAddress,
+      abi: PropertyOfferingABI,
+      functionName: 'claimTokens',
+      args: [],
+    });
+  }, [writeContractAsync, offeringAddress]);
+
+  return { claim, txHash, isPending: isPending || isConfirming, isSuccess, error };
+}

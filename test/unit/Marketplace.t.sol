@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import {Test} from "../../lib/forge-std/src/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {Marketplace} from "../../src/core/Marketplace.sol";
 import {PropertyToken} from "../../src/core/PropertyToken.sol";
@@ -19,7 +20,8 @@ import {
     Marketplace__NotLister,
     Marketplace__ListingExpired,
     Marketplace__FeeTooHigh,
-    Marketplace__ZeroFeeCollector
+    Marketplace__ZeroFeeCollector,
+    Marketplace__InsufficientListingAmount
 } from "../../src/utils/Errors.sol";
 import {
     ListingCreated,
@@ -45,7 +47,9 @@ contract MarketplaceTest is Test {
 
     uint256 internal constant TOKEN_SUPPLY  = 1_000 ether;
     uint256 internal constant ALICE_TOKENS  = 600 ether;
-    uint256 internal constant PRICE_PER_TOK = 10; // 10 wei per fractional token unit
+    /// @dev Payment-token units per ONE WHOLE property token (1e18 wei) — the unit
+    ///      Marketplace and PropertyOffering now share. Cost = amount * price / 1e18.
+    uint256 internal constant PRICE_PER_TOK = 10 ether;
 
     function setUp() public {
         vm.startPrank(admin);
@@ -98,6 +102,11 @@ contract MarketplaceTest is Test {
         // Bob approves marketplace to spend his USDC
         vm.prank(bob);
         usdc.approve(address(market), type(uint256).max);
+    }
+
+    /// @dev Mirrors Marketplace's cost formula: ceil(amount * pricePerToken / 1e18).
+    function _cost(uint256 amount) internal pure returns (uint256) {
+        return Math.mulDiv(amount, PRICE_PER_TOK, 1e18, Math.Rounding.Ceil);
     }
 
     // ─── Upgrade test ────────────────────────────────────────────────────────
@@ -198,7 +207,7 @@ contract MarketplaceTest is Test {
         // Bob holds the tokens
         assertEq(token.balanceOf(bob), 100 ether);
         // Alice got paid
-        assertEq(usdc.balanceOf(alice), aliceUsdcBefore + 100 ether * PRICE_PER_TOK);
+        assertEq(usdc.balanceOf(alice), aliceUsdcBefore + _cost(100 ether));
         // Listing is sold
         assertEq(uint8(market.getListing(listingId).status), uint8(Types.ListingStatus.Sold));
     }
@@ -221,7 +230,7 @@ contract MarketplaceTest is Test {
         vm.prank(alice);
         uint256 listingId = market.createListing(propertyId, 100 ether, PRICE_PER_TOK, 0);
 
-        uint256 totalCost = 50 ether * PRICE_PER_TOK;
+        uint256 totalCost = _cost(50 ether);
         vm.prank(bob);
         vm.expectEmit(true, true, false, true, address(market));
         emit ListingPurchased(listingId, bob, 50 ether, totalCost);
@@ -351,8 +360,8 @@ contract MarketplaceTest is Test {
     function test_fee_deductedFromSellerPayment() public {
         address collector = makeAddr("collector");
         vm.startPrank(admin);
-        market.setFee(200); // 2%
         market.setFeeCollector(collector);
+        market.setFee(200); // 2%
         vm.stopPrank();
 
         vm.prank(alice);
@@ -364,7 +373,7 @@ contract MarketplaceTest is Test {
         vm.prank(bob);
         market.buyListing(listingId, 100 ether);
 
-        uint256 totalCost = 100 ether * PRICE_PER_TOK;
+        uint256 totalCost = _cost(100 ether);
         uint256 fee       = (totalCost * 200) / 10_000;
 
         assertEq(usdc.balanceOf(collector),   collectorBefore + fee);
@@ -374,14 +383,14 @@ contract MarketplaceTest is Test {
     function test_fee_emitsProtocolFeeCollected() public {
         address collector = makeAddr("collector");
         vm.startPrank(admin);
-        market.setFee(100); // 1%
         market.setFeeCollector(collector);
+        market.setFee(100); // 1%
         vm.stopPrank();
 
         vm.prank(alice);
         uint256 listingId = market.createListing(propertyId, 100 ether, PRICE_PER_TOK, 0);
 
-        uint256 totalCost = 100 ether * PRICE_PER_TOK;
+        uint256 totalCost = _cost(100 ether);
         uint256 fee       = (totalCost * 100) / 10_000;
 
         vm.prank(bob);
@@ -400,20 +409,39 @@ contract MarketplaceTest is Test {
         vm.prank(bob);
         market.buyListing(listingId, 100 ether);
 
-        assertEq(usdc.balanceOf(alice), aliceBefore + 100 ether * PRICE_PER_TOK);
+        assertEq(usdc.balanceOf(alice), aliceBefore + _cost(100 ether));
     }
 
     function test_setFee_updatesFeeBps() public {
-        vm.prank(admin);
+        vm.startPrank(admin);
+        market.setFeeCollector(makeAddr("collector"));
         market.setFee(500);
+        vm.stopPrank();
         assertEq(market.feeBps(), 500);
     }
 
-    function test_setFee_emitsFeeUpdated() public {
+    /// @dev A fee with no collector would be silently skipped in buyListing(), so arming
+    ///      one is rejected rather than quietly dropping protocol revenue.
+    function test_revert_setFee_withoutCollector() public {
+        assertEq(market.feeCollector(), address(0));
         vm.prank(admin);
+        vm.expectRevert(Marketplace__ZeroFeeCollector.selector);
+        market.setFee(500);
+    }
+
+    function test_setFee_toZero_allowedWithoutCollector() public {
+        vm.prank(admin);
+        market.setFee(0);
+        assertEq(market.feeBps(), 0);
+    }
+
+    function test_setFee_emitsFeeUpdated() public {
+        vm.startPrank(admin);
+        market.setFeeCollector(makeAddr("collector"));
         vm.expectEmit(false, false, false, true, address(market));
         emit FeeUpdated(300);
         market.setFee(300);
+        vm.stopPrank();
     }
 
     function test_revert_setFee_tooHigh() public {
@@ -486,5 +514,69 @@ contract MarketplaceTest is Test {
         uint256 listingId = market.createListing(propertyId, 100 ether, PRICE_PER_TOK, expiry);
         assertEq(market.getListing(listingId).expiresAt, expiry);
     }
-}
 
+    // ─── Price unit ──────────────────────────────────────────────────────────
+
+    /// @dev The bug this scaling fixes: cost was `amount * pricePerToken` with `amount` in
+    ///      18-decimal wei, so a realistic per-token price had to be expressed as a
+    ///      fraction below 1 and truncated to zero — and zero is rejected as ZeroPrice.
+    ///      A $50 USDC-denominated token is now a plain, expressible number.
+    function test_realisticPrice_isExpressibleAndCharged() public {
+        uint256 priceUsdc = 50e6; // $50.00 at USDC's 6 decimals
+
+        // Under the old per-wei unit this price would have had to be 50e6/1e18 → 0.
+        assertEq(priceUsdc / 1e18, uint256(0), "old unit could not express this price");
+
+        vm.prank(alice);
+        uint256 listingId = market.createListing(propertyId, 10 ether, priceUsdc, 0);
+
+        uint256 aliceBefore = usdc.balanceOf(alice);
+        vm.prank(bob);
+        market.buyListing(listingId, 2 ether); // buy 2 whole tokens
+
+        // 2 tokens x $50 = $100.00
+        assertEq(usdc.balanceOf(alice), aliceBefore + 100e6);
+        assertEq(token.balanceOf(bob), 2 ether);
+    }
+
+    /// @dev Cost rounds up, so a dust purchase can never be free.
+    function test_dustPurchase_isNotFree() public {
+        vm.prank(alice);
+        uint256 listingId = market.createListing(propertyId, 100 ether, PRICE_PER_TOK, 0);
+
+        uint256 aliceBefore = usdc.balanceOf(alice);
+        vm.prank(bob);
+        market.buyListing(listingId, 1); // one wei of a token
+
+        uint256 paid = usdc.balanceOf(alice) - aliceBefore;
+        assertGt(paid, 0, "dust must still cost something");
+        assertEq(paid, _cost(1));
+    }
+
+    function test_partialBuy_costMatchesProportion() public {
+        vm.prank(alice);
+        uint256 listingId = market.createListing(propertyId, 100 ether, PRICE_PER_TOK, 0);
+
+        uint256 aliceBefore = usdc.balanceOf(alice);
+        vm.prank(bob);
+        market.buyListing(listingId, 30 ether);
+
+        assertEq(usdc.balanceOf(alice), aliceBefore + _cost(30 ether));
+        assertEq(market.getListing(listingId).tokenAmount, 70 ether);
+        assertEq(uint8(market.getListing(listingId).status), uint8(Types.ListingStatus.Active));
+    }
+
+    /// @dev Buying more than the listing holds used to fail on an arithmetic underflow panic.
+    function test_revert_buyListing_moreThanListed() public {
+        vm.prank(alice);
+        uint256 listingId = market.createListing(propertyId, 100 ether, PRICE_PER_TOK, 0);
+
+        vm.prank(bob);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                Marketplace__InsufficientListingAmount.selector, listingId, 101 ether, 100 ether
+            )
+        );
+        market.buyListing(listingId, 101 ether);
+    }
+}

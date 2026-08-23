@@ -1,11 +1,37 @@
 'use client';
 
-import { useState } from 'react';
-import { useWriteContract, useWaitForTransactionReceipt, usePublicClient, useReadContracts } from 'wagmi';
+import { useMemo, useState } from 'react';
+import {
+  useWriteContract,
+  useWaitForTransactionReceipt,
+  usePublicClient,
+  useReadContracts,
+  useChainId,
+} from 'wagmi';
 import { isAddress, parseAbiItem } from 'viem';
 import { useQuery } from '@tanstack/react-query';
 import { KYCRegistryABI } from '@/lib/contracts/abis';
 import { useContracts } from '@/lib/contracts/useContracts';
+import { countryName } from '@/lib/constants/countries';
+import { formatDate, shortAddress } from '@/lib/format';
+import { explorerAddressUrl } from '@/lib/explorer';
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  CardBody,
+  CardHeader,
+  CardTitle,
+  Field,
+  Input,
+  Select,
+  Table,
+  TableWrap,
+  Td,
+  Th,
+  Tr,
+} from '@/components/ui';
 
 type VerifyForm = {
   address: string;
@@ -25,27 +51,32 @@ type InvestorRow = {
   frozen: boolean;
 };
 
-const INVESTOR_TYPE_LABEL: Record<number, string> = { 0: 'Unset', 1: 'Retail', 2: 'Accredited', 3: 'Qualified' };
+const INVESTOR_TYPE_LABEL: Record<number, string> = {
+  0: 'Unset',
+  1: 'Retail',
+  2: 'Accredited',
+  3: 'Qualified',
+};
+
+const ACCOUNT_VERIFIED_EVENT = parseAbiItem(
+  'event AccountVerified(address indexed account, address indexed verifiedBy, uint16 countryCode, uint8 investorType, uint48 expiresAt, uint256 timestamp)',
+);
 
 export default function AdminKYC() {
   const { addresses } = useContracts();
+  const chainId = useChainId();
   const { writeContract, isPending, data: txHash } = useWriteContract();
   const { isLoading: isConfirming } = useWaitForTransactionReceipt({ hash: txHash });
 
   const [form, setForm] = useState<VerifyForm>(BLANK_FORM);
   const [formErrors, setFormErrors] = useState<Partial<VerifyForm>>({});
 
-  // Single address for revoke / freeze / unfreeze actions
   const [actionAddr, setActionAddr] = useState('');
   const [actionAddrError, setActionAddrError] = useState('');
 
   const publicClient = usePublicClient();
 
-  const ACCOUNT_VERIFIED_EVENT = parseAbiItem(
-    'event AccountVerified(address indexed account, address indexed verifiedBy, uint16 countryCode, uint8 investorType, uint48 expiresAt, uint256 timestamp)',
-  );
-
-  // Step 1 — collect unique verified addresses from logs
+  // Step 1 — collect unique verified addresses from AccountVerified logs.
   const { data: verifiedAddresses, refetch: refetchLogs } = useQuery({
     queryKey: ['kyc-verified-addresses', addresses.kycRegistry],
     queryFn: async () => {
@@ -56,7 +87,6 @@ export default function AdminKYC() {
         fromBlock: 0n,
         toBlock: 'latest',
       });
-      // deduplicate; keep last occurrence order
       const seen = new Map<string, `0x${string}`>();
       logs.forEach((log) => {
         if (log.args.account) seen.set(log.args.account.toLowerCase(), log.args.account);
@@ -66,7 +96,7 @@ export default function AdminKYC() {
     staleTime: 30_000,
   });
 
-  // Step 2 — batch getInvestorRecord for each address
+  // Step 2 — batch getInvestorRecord for each address.
   const { data: recordResults, refetch: refetchRecords } = useReadContracts({
     contracts: (verifiedAddresses ?? []).map((addr) => ({
       address: addresses.kycRegistry,
@@ -78,8 +108,8 @@ export default function AdminKYC() {
   });
 
   function refetchInvestors() {
-    refetchLogs();
-    refetchRecords();
+    void refetchLogs();
+    void refetchRecords();
   }
 
   type RawRecord = {
@@ -91,51 +121,55 @@ export default function AdminKYC() {
     frozen: boolean;
   };
 
-  const investors: InvestorRow[] = (verifiedAddresses ?? [])
-    .map((addr, i) => {
-      const rec = recordResults?.[i]?.result as RawRecord | undefined;
-      return {
-        id: addr,
-        countryCode: rec?.countryCode ?? 0,
-        investorType: rec?.investorType ?? 0,
-        verifiedAt: rec ? rec.verifiedAt.toString() : '0',
-        expiresAt: rec ? rec.expiresAt.toString() : '0',
-        frozen: rec?.frozen ?? false,
-      };
-    })
-    .filter((inv) => inv.countryCode !== 0);
+  const investors = useMemo<InvestorRow[]>(
+    () =>
+      (verifiedAddresses ?? [])
+        .map((addr, i) => {
+          const rec = recordResults?.[i]?.result as RawRecord | undefined;
+          return {
+            id: addr,
+            countryCode: rec?.countryCode ?? 0,
+            investorType: rec?.investorType ?? 0,
+            verifiedAt: rec ? rec.verifiedAt.toString() : '0',
+            expiresAt: rec ? rec.expiresAt.toString() : '0',
+            frozen: rec?.frozen ?? false,
+          };
+        })
+        .filter((inv) => inv.countryCode !== 0),
+    [verifiedAddresses, recordResults],
+  );
 
   const busy = isPending || isConfirming;
 
-  // ─── Validation ─────────────────────────────────────────────────────────────
+  // ─── Validation ────────────────────────────────────────────────────────────
 
   function validateForm(): boolean {
     const errors: Partial<VerifyForm> = {};
-    if (!isAddress(form.address)) errors.address = 'Invalid address';
-    const cc = parseInt(form.countryCode);
-    if (isNaN(cc) || cc < 1 || cc > 999) errors.countryCode = '1–999 ISO numeric';
-    const it = parseInt(form.investorType);
-    if (![1, 2, 3].includes(it)) errors.investorType = 'Must be 1, 2, or 3';
+    if (!isAddress(form.address)) errors.address = 'Not a valid Ethereum address';
+    const cc = parseInt(form.countryCode, 10);
+    if (Number.isNaN(cc) || cc < 1 || cc > 999) errors.countryCode = 'ISO numeric, 1–999';
+    const it = parseInt(form.investorType, 10);
+    if (![1, 2, 3].includes(it)) errors.investorType = 'Must be Retail, Accredited or Qualified';
     setFormErrors(errors);
     return Object.keys(errors).length === 0;
   }
 
   function validateActionAddr(): boolean {
     if (!isAddress(actionAddr)) {
-      setActionAddrError('Invalid address');
+      setActionAddrError('Not a valid Ethereum address');
       return false;
     }
     setActionAddrError('');
     return true;
   }
 
-  // ─── Handlers ───────────────────────────────────────────────────────────────
+  // ─── Handlers ──────────────────────────────────────────────────────────────
 
   function handleVerify() {
     if (!validateForm()) return;
     const expiresAtSecs = form.expiresAt
-      ? BigInt(Math.floor(new Date(form.expiresAt).getTime() / 1000))
-      : 0n;
+      ? Math.floor(new Date(form.expiresAt).getTime() / 1000)
+      : 0;
     writeContract(
       {
         address: addresses.kycRegistry,
@@ -143,9 +177,9 @@ export default function AdminKYC() {
         functionName: 'verify',
         args: [
           form.address as `0x${string}`,
-          parseInt(form.countryCode),
-          parseInt(form.investorType),
-          Number(expiresAtSecs),
+          parseInt(form.countryCode, 10),
+          parseInt(form.investorType, 10),
+          expiresAtSecs,
         ],
       },
       {
@@ -153,197 +187,221 @@ export default function AdminKYC() {
           setForm(BLANK_FORM);
           refetchInvestors();
         },
-      }
+      },
     );
   }
 
-  function handleRevoke() {
+  function writeSimple(fn: 'revoke' | 'freeze' | 'unfreeze') {
     if (!validateActionAddr()) return;
     writeContract(
-      { address: addresses.kycRegistry, abi: KYCRegistryABI, functionName: 'revoke', args: [actionAddr as `0x${string}`] },
-      { onSuccess: () => refetchInvestors() }
+      {
+        address: addresses.kycRegistry,
+        abi: KYCRegistryABI,
+        functionName: fn,
+        args: [actionAddr as `0x${string}`],
+      },
+      { onSuccess: () => refetchInvestors() },
     );
   }
 
-  function handleFreeze() {
-    if (!validateActionAddr()) return;
-    writeContract(
-      { address: addresses.kycRegistry, abi: KYCRegistryABI, functionName: 'freeze', args: [actionAddr as `0x${string}`] },
-      { onSuccess: () => refetchInvestors() }
-    );
-  }
-
-  function handleUnfreeze() {
-    if (!validateActionAddr()) return;
-    writeContract(
-      { address: addresses.kycRegistry, abi: KYCRegistryABI, functionName: 'unfreeze', args: [actionAddr as `0x${string}`] },
-      { onSuccess: () => refetchInvestors() }
-    );
-  }
-
-  // ─── Render ─────────────────────────────────────────────────────────────────
+  // ─── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="space-y-8">
-      {/* ── Verify form ─────────────────────────────────────────────────── */}
-      <section className="rounded-xl border border-gray-200 p-6 bg-white">
-        <h3 className="text-base font-semibold text-gray-800 mb-4">Verify Investor</h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div className="sm:col-span-2">
-            <label className="block text-xs font-medium text-gray-600 mb-1">Wallet Address</label>
-            <input
-              type="text"
-              placeholder="0x…"
-              value={form.address}
-              onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            />
-            {formErrors.address && <p className="mt-1 text-xs text-red-500">{formErrors.address}</p>}
-          </div>
-
-          <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Country Code (ISO numeric)</label>
-            <input
-              type="number"
-              min={1}
-              max={999}
-              placeholder="840"
-              value={form.countryCode}
-              onChange={(e) => setForm((f) => ({ ...f, countryCode: e.target.value }))}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            />
-            {formErrors.countryCode && <p className="mt-1 text-xs text-red-500">{formErrors.countryCode}</p>}
-          </div>
-
-          <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Investor Type</label>
-            <select
-              value={form.investorType}
-              onChange={(e) => setForm((f) => ({ ...f, investorType: e.target.value }))}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+    <div className="space-y-5">
+      {/* Verify */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Verify an investor</CardTitle>
+          <p className="mt-1 text-xs text-muted">
+            Writes the wallet into the KYC registry. Until this lands, the compliance module rejects
+            every transfer to that address.
+          </p>
+        </CardHeader>
+        <CardBody className="space-y-4">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field
+              label="Wallet address"
+              htmlFor="kyc-address"
+              error={formErrors.address}
+              className="sm:col-span-2"
             >
-              <option value="1">1 — Retail</option>
-              <option value="2">2 — Accredited</option>
-              <option value="3">3 — Qualified</option>
-            </select>
-            {formErrors.investorType && <p className="mt-1 text-xs text-red-500">{formErrors.investorType}</p>}
+              <Input
+                id="kyc-address"
+                placeholder="0x…"
+                value={form.address}
+                onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))}
+                className="font-mono text-xs"
+                spellCheck={false}
+              />
+            </Field>
+
+            <Field
+              label="Country code"
+              htmlFor="kyc-country"
+              hint="ISO 3166-1 numeric"
+              error={formErrors.countryCode}
+            >
+              <Input
+                id="kyc-country"
+                type="number"
+                min={1}
+                max={999}
+                placeholder="840"
+                value={form.countryCode}
+                onChange={(e) => setForm((f) => ({ ...f, countryCode: e.target.value }))}
+                className="tabular"
+              />
+            </Field>
+
+            <Field label="Investor type" htmlFor="kyc-type" error={formErrors.investorType}>
+              <Select
+                id="kyc-type"
+                value={form.investorType}
+                onChange={(e) => setForm((f) => ({ ...f, investorType: e.target.value }))}
+              >
+                <option value="1">Retail</option>
+                <option value="2">Accredited</option>
+                <option value="3">Qualified</option>
+              </Select>
+            </Field>
+
+            <Field
+              label="KYC expiry"
+              htmlFor="kyc-expiry"
+              hint="Blank = never expires"
+              className="sm:col-span-2"
+            >
+              <Input
+                id="kyc-expiry"
+                type="date"
+                value={form.expiresAt}
+                onChange={(e) => setForm((f) => ({ ...f, expiresAt: e.target.value }))}
+              />
+            </Field>
           </div>
 
-          <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">
-              KYC Expiry <span className="text-gray-400">(leave blank for no expiry)</span>
-            </label>
-            <input
-              type="date"
-              value={form.expiresAt}
-              onChange={(e) => setForm((f) => ({ ...f, expiresAt: e.target.value }))}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            />
-          </div>
-        </div>
+          <Button loading={busy} onClick={handleVerify}>
+            Verify investor
+          </Button>
+        </CardBody>
+      </Card>
 
-        <button
-          disabled={busy}
-          onClick={handleVerify}
-          className="mt-5 rounded-lg bg-indigo-600 px-5 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50 transition-colors"
-        >
-          {busy ? 'Pending…' : 'Verify Investor'}
-        </button>
-      </section>
-
-      {/* ── Revoke / Freeze / Unfreeze ───────────────────────────────────── */}
-      <section className="rounded-xl border border-gray-200 p-6 bg-white">
-        <h3 className="text-base font-semibold text-gray-800 mb-4">Revoke / Freeze / Unfreeze</h3>
-        <div className="flex flex-col sm:flex-row gap-3">
-          <div className="flex-1">
-            <input
-              type="text"
-              placeholder="0x investor address…"
+      {/* Revoke / freeze / unfreeze */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Revoke, freeze or unfreeze</CardTitle>
+          <p className="mt-1 text-xs text-muted">
+            Freezing blocks transfers and rent claims immediately. Revoking removes the verification
+            record entirely.
+          </p>
+        </CardHeader>
+        <CardBody className="space-y-4">
+          <Field label="Investor address" htmlFor="kyc-action-addr" error={actionAddrError}>
+            <Input
+              id="kyc-action-addr"
+              placeholder="0x…"
               value={actionAddr}
               onChange={(e) => setActionAddr(e.target.value)}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              className="font-mono text-xs"
+              spellCheck={false}
             />
-            {actionAddrError && <p className="mt-1 text-xs text-red-500">{actionAddrError}</p>}
-          </div>
-          <div className="flex gap-2">
-            <button
-              disabled={busy}
-              onClick={handleRevoke}
-              className="rounded-lg bg-red-500 px-4 py-2 text-xs font-semibold text-white hover:bg-red-600 disabled:opacity-50 transition-colors"
-            >
-              Revoke
-            </button>
-            <button
-              disabled={busy}
-              onClick={handleFreeze}
-              className="rounded-lg bg-orange-500 px-4 py-2 text-xs font-semibold text-white hover:bg-orange-600 disabled:opacity-50 transition-colors"
-            >
-              Freeze
-            </button>
-            <button
-              disabled={busy}
-              onClick={handleUnfreeze}
-              className="rounded-lg bg-emerald-500 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-600 disabled:opacity-50 transition-colors"
-            >
-              Unfreeze
-            </button>
-          </div>
-        </div>
-      </section>
+          </Field>
 
-      {/* ── Recent verified investors (from subgraph) ────────────────────── */}
-      <section className="rounded-xl border border-gray-200 bg-white overflow-x-auto">
-        <div className="px-6 py-4 border-b border-gray-100">
-          <h3 className="text-base font-semibold text-gray-800">Recent Verified Investors</h3>
-          <p className="text-xs text-gray-400 mt-0.5">Data sourced from the subgraph — requires a running Graph node.</p>
-        </div>
-        <table className="min-w-full divide-y divide-gray-100 text-sm">
-          <thead className="bg-gray-50">
-            <tr>
-              {['Address', 'Country', 'Type', 'Verified At', 'Expires', 'Frozen'].map((h) => (
-                <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-50">
-            {investors.length === 0 && (
+          <div className="flex flex-wrap gap-2">
+            <Button variant="danger" loading={busy} onClick={() => writeSimple('revoke')}>
+              Revoke
+            </Button>
+            <Button variant="secondary" loading={busy} onClick={() => writeSimple('freeze')}>
+              Freeze
+            </Button>
+            <Button variant="outline" loading={busy} onClick={() => writeSimple('unfreeze')}>
+              Unfreeze
+            </Button>
+          </div>
+
+          <Alert tone="warn">
+            These actions take effect on the next block and apply protocol-wide.
+          </Alert>
+        </CardBody>
+      </Card>
+
+      {/* Recent verified investors */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Recently verified investors</CardTitle>
+          <p className="mt-1 text-xs text-muted">
+            Last 20 wallets from <span className="font-mono">AccountVerified</span> logs, with their
+            current registry record.
+          </p>
+        </CardHeader>
+
+        <TableWrap>
+          <Table>
+            <thead>
               <tr>
-                <td colSpan={6} className="px-4 py-6 text-center text-gray-400">
-                  No verified investors indexed yet.
-                </td>
+                <Th>Address</Th>
+                <Th>Country</Th>
+                <Th>Type</Th>
+                <Th>Verified</Th>
+                <Th>Expires</Th>
+                <Th>State</Th>
               </tr>
-            )}
-            {investors.map((inv) => (
-              <tr key={inv.id} className="hover:bg-gray-50 transition-colors">
-                <td className="px-4 py-3 font-mono text-xs text-gray-700">
-                  {inv.id.slice(0, 6)}…{inv.id.slice(-4)}
-                </td>
-                <td className="px-4 py-3 text-gray-700">{inv.countryCode}</td>
-                <td className="px-4 py-3 text-gray-700">{INVESTOR_TYPE_LABEL[inv.investorType] ?? inv.investorType}</td>
-                <td className="px-4 py-3 text-gray-700">
-                  {inv.verifiedAt !== '0'
-                    ? new Date(parseInt(inv.verifiedAt) * 1000).toLocaleDateString()
-                    : '—'}
-                </td>
-                <td className="px-4 py-3 text-gray-700">
-                  {inv.expiresAt !== '0'
-                    ? new Date(parseInt(inv.expiresAt) * 1000).toLocaleDateString()
-                    : 'Never'}
-                </td>
-                <td className="px-4 py-3">
-                  {inv.frozen ? (
-                    <span className="text-xs font-semibold text-orange-600">Frozen</span>
-                  ) : (
-                    <span className="text-xs text-gray-400">—</span>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </section>
+            </thead>
+            <tbody>
+              {investors.length === 0 && (
+                <tr>
+                  <Td colSpan={6} align="center" className="py-10 text-muted">
+                    No verified investors found in the event logs yet.
+                  </Td>
+                </tr>
+              )}
+              {investors.map((inv) => {
+                const url = explorerAddressUrl(chainId, inv.id);
+                return (
+                  <Tr key={inv.id}>
+                    <Td>
+                      {url ? (
+                        <a
+                          href={url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="font-mono text-xs text-accent hover:text-accent-hover"
+                        >
+                          {shortAddress(inv.id)}
+                        </a>
+                      ) : (
+                        <span className="font-mono text-xs">{shortAddress(inv.id)}</span>
+                      )}
+                    </Td>
+                    <Td>
+                      {countryName(inv.countryCode)}{' '}
+                      <span className="text-faint">({inv.countryCode})</span>
+                    </Td>
+                    <Td>{INVESTOR_TYPE_LABEL[inv.investorType] ?? inv.investorType}</Td>
+                    <Td className="tabular">
+                      {inv.verifiedAt !== '0' ? formatDate(BigInt(inv.verifiedAt)) : '—'}
+                    </Td>
+                    <Td className="tabular">
+                      {inv.expiresAt !== '0' ? formatDate(BigInt(inv.expiresAt)) : 'Never'}
+                    </Td>
+                    <Td>
+                      {inv.frozen ? (
+                        <Badge tone="negative" dot>
+                          Frozen
+                        </Badge>
+                      ) : (
+                        <Badge tone="positive" dot>
+                          Active
+                        </Badge>
+                      )}
+                    </Td>
+                  </Tr>
+                );
+              })}
+            </tbody>
+          </Table>
+        </TableWrap>
+      </Card>
     </div>
   );
 }

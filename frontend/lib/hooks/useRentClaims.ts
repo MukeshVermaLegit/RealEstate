@@ -29,6 +29,8 @@ export function useRentClaims(
   const { addresses }  = useContracts();
   const publicClient   = usePublicClient();
 
+  const enabled = !!address && propertyIds.length > 0 && !!publicClient;
+
   const { data, isPending, refetch } = useQuery({
     // Include stable string versions of propertyIds so the key updates correctly
     queryKey: ['rent-claims', address, propertyIds.map(String)],
@@ -39,14 +41,15 @@ export function useRentClaims(
         publicClient!,
         addresses.rentDistributor,
       ),
-    enabled:   !!address && propertyIds.length > 0 && !!publicClient,
+    enabled,
     staleTime: 30_000,
   });
 
   const claims         = data ?? [];
   const totalClaimable = claims.reduce((sum, c) => sum + c.amount, 0n);
 
-  return { claims, totalClaimable, isLoading: isPending, refetch };
+  // Disabled queries stay `pending`; a holder with no properties is not loading.
+  return { claims, totalClaimable, isLoading: enabled && isPending, refetch };
 }
 
 // ─── useClaimRent ─────────────────────────────────────────────────────────────

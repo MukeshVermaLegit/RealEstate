@@ -18,7 +18,12 @@ import {
     RentDistributor__ExceedsTotalRent,
     RentDistributor__ArrayLengthMismatch,
     RentDistributor__InvalidSnapshotBlock,
-    RentDistributor__ExceedsEntitlement
+    RentDistributor__ExceedsEntitlement,
+    RentDistributor__NothingToReclaim,
+    RentDistributor__ZeroMerkleRoot,
+    RentDistributor__NoTokenForProperty,
+    RentDistributor__EmptySnapshot,
+    RentDistributor__PeriodReclaimed
 } from "../../src/utils/Errors.sol";
 import {RentDeposited, RentClaimed, UnclaimedRentReclaimed} from "../../src/utils/Events.sol";
 
@@ -54,6 +59,11 @@ contract RentDistributorTest is Test {
     uint256 internal constant CAROL_AMOUNT = 200e18;
     uint256 internal constant DAVE_AMOUNT  = 200e18;
     uint256 internal constant TOTAL_RENT   = 1_400e18;
+
+    /// @dev Votes token backing the entitlement cap, with balances proportional to the
+    ///      Merkle allocations below, plus the past block the cap is evaluated at.
+    MockVotesToken internal propToken;
+    uint256 internal snapshotBlock;
 
     // Merkle tree state computed in setUp
     bytes32 internal merkleRoot;
@@ -133,20 +143,42 @@ contract RentDistributorTest is Test {
         proofDave = new bytes32[](2);
         proofDave[0] = lC;
         proofDave[1] = h01;
+
+        // ── Votes token for the entitlement cap ──────────────────────────────
+        // depositRent now REQUIRES a non-zero snapshot resolving to a non-empty
+        // checkpoint, so every period needs a registered token behind it.
+        // Balances mirror the Merkle allocations exactly (600/400/200/200 of 1400),
+        // so each investor's cap equals their allocation on a TOTAL_RENT deposit.
+        vm.startPrank(admin);
+        propToken = new MockVotesToken("PropToken", "PT");
+        propToken.mint(alice, 600 ether);
+        propToken.mint(bob,   400 ether);
+        propToken.mint(carol, 200 ether);
+        propToken.mint(dave,  200 ether);
+        registry.setTokenAddress(propertyId, address(propToken));
+        vm.stopPrank();
+
+        vm.prank(alice); propToken.delegate(alice);
+        vm.prank(bob);   propToken.delegate(bob);
+        vm.prank(carol); propToken.delegate(carol);
+        vm.prank(dave);  propToken.delegate(dave);
+
+        vm.roll(block.number + 1);
+        snapshotBlock = block.number - 1;
     }
 
     // ─── depositRent ─────────────────────────────────────────────────────────
 
     function test_depositRent_returnsPeriodId() public {
         vm.prank(admin);
-        uint256 periodId = distributor.depositRent(propertyId, TOTAL_RENT, merkleRoot, 0);
+        uint256 periodId = distributor.depositRent(propertyId, TOTAL_RENT, merkleRoot, snapshotBlock);
         assertEq(periodId, 1);
     }
 
     function test_depositRent_incrementsPeriodId() public {
         vm.startPrank(admin);
-        uint256 p1 = distributor.depositRent(propertyId, TOTAL_RENT, merkleRoot, 0);
-        uint256 p2 = distributor.depositRent(propertyId, TOTAL_RENT, merkleRoot, 0);
+        uint256 p1 = distributor.depositRent(propertyId, TOTAL_RENT, merkleRoot, snapshotBlock);
+        uint256 p2 = distributor.depositRent(propertyId, TOTAL_RENT, merkleRoot, snapshotBlock);
         vm.stopPrank();
         assertEq(p1, 1);
         assertEq(p2, 2);
@@ -155,7 +187,7 @@ contract RentDistributorTest is Test {
     function test_depositRent_transfersUSDCToDistributor() public {
         uint256 adminBefore = usdc.balanceOf(admin);
         vm.prank(admin);
-        distributor.depositRent(propertyId, TOTAL_RENT, merkleRoot, 0);
+        distributor.depositRent(propertyId, TOTAL_RENT, merkleRoot, snapshotBlock);
         assertEq(usdc.balanceOf(admin),                adminBefore - TOTAL_RENT);
         assertEq(usdc.balanceOf(address(distributor)), TOTAL_RENT);
     }
@@ -164,13 +196,13 @@ contract RentDistributorTest is Test {
         vm.prank(admin);
         vm.expectEmit(true, true, false, true, address(distributor));
         emit RentDeposited(propertyId, 1, TOTAL_RENT, merkleRoot);
-        distributor.depositRent(propertyId, TOTAL_RENT, merkleRoot, 0);
+        distributor.depositRent(propertyId, TOTAL_RENT, merkleRoot, snapshotBlock);
     }
 
     function test_revert_depositRent_zeroAmount() public {
         vm.prank(admin);
         vm.expectRevert(RentDistributor__ZeroRent.selector);
-        distributor.depositRent(propertyId, 0, merkleRoot, 0);
+        distributor.depositRent(propertyId, 0, merkleRoot, snapshotBlock);
     }
 
     function test_revert_depositRent_notPropertyOwner() public {
@@ -178,14 +210,14 @@ contract RentDistributorTest is Test {
         vm.expectRevert(
             abi.encodeWithSelector(RentDistributor__NotPropertyOwner.selector, propertyId)
         );
-        distributor.depositRent(propertyId, TOTAL_RENT, merkleRoot, 0);
+        distributor.depositRent(propertyId, TOTAL_RENT, merkleRoot, snapshotBlock);
     }
 
     // ─── claimRent ───────────────────────────────────────────────────────────
 
     function test_claimRent_alice_receivesCorrectAmount() public {
         vm.prank(admin);
-        uint256 periodId = distributor.depositRent(propertyId, TOTAL_RENT, merkleRoot, 0);
+        uint256 periodId = distributor.depositRent(propertyId, TOTAL_RENT, merkleRoot, snapshotBlock);
 
         uint256 aliceBefore = usdc.balanceOf(alice);
         vm.prank(alice);
@@ -196,7 +228,7 @@ contract RentDistributorTest is Test {
 
     function test_claimRent_bob_receivesCorrectAmount() public {
         vm.prank(admin);
-        uint256 periodId = distributor.depositRent(propertyId, TOTAL_RENT, merkleRoot, 0);
+        uint256 periodId = distributor.depositRent(propertyId, TOTAL_RENT, merkleRoot, snapshotBlock);
 
         vm.prank(bob);
         distributor.claimRent(propertyId, periodId, BOB_AMOUNT, proofBob);
@@ -206,7 +238,7 @@ contract RentDistributorTest is Test {
 
     function test_claimRent_emitsEvent() public {
         vm.prank(admin);
-        uint256 periodId = distributor.depositRent(propertyId, TOTAL_RENT, merkleRoot, 0);
+        uint256 periodId = distributor.depositRent(propertyId, TOTAL_RENT, merkleRoot, snapshotBlock);
 
         vm.prank(alice);
         vm.expectEmit(true, true, true, true, address(distributor));
@@ -216,7 +248,7 @@ contract RentDistributorTest is Test {
 
     function test_claimRent_allFourInvestors_fullDistribution() public {
         vm.prank(admin);
-        uint256 periodId = distributor.depositRent(propertyId, TOTAL_RENT, merkleRoot, 0);
+        uint256 periodId = distributor.depositRent(propertyId, TOTAL_RENT, merkleRoot, snapshotBlock);
 
         vm.prank(alice);
         distributor.claimRent(propertyId, periodId, ALICE_AMOUNT, proofAlice);
@@ -237,7 +269,7 @@ contract RentDistributorTest is Test {
 
     function test_revert_claimRent_invalidProof() public {
         vm.prank(admin);
-        uint256 periodId = distributor.depositRent(propertyId, TOTAL_RENT, merkleRoot, 0);
+        uint256 periodId = distributor.depositRent(propertyId, TOTAL_RENT, merkleRoot, snapshotBlock);
 
         // Give alice bob's proof — should fail
         vm.prank(alice);
@@ -247,7 +279,7 @@ contract RentDistributorTest is Test {
 
     function test_revert_claimRent_wrongAmount() public {
         vm.prank(admin);
-        uint256 periodId = distributor.depositRent(propertyId, TOTAL_RENT, merkleRoot, 0);
+        uint256 periodId = distributor.depositRent(propertyId, TOTAL_RENT, merkleRoot, snapshotBlock);
 
         // Alice tries to claim more than allocated
         vm.prank(alice);
@@ -257,7 +289,7 @@ contract RentDistributorTest is Test {
 
     function test_revert_claimRent_doubleClaim() public {
         vm.prank(admin);
-        uint256 periodId = distributor.depositRent(propertyId, TOTAL_RENT, merkleRoot, 0);
+        uint256 periodId = distributor.depositRent(propertyId, TOTAL_RENT, merkleRoot, snapshotBlock);
 
         vm.prank(alice);
         distributor.claimRent(propertyId, periodId, ALICE_AMOUNT, proofAlice);
@@ -281,8 +313,8 @@ contract RentDistributorTest is Test {
 
     function test_claimMultiple_twoPeriodsInOneTx() public {
         vm.startPrank(admin);
-        uint256 p1 = distributor.depositRent(propertyId, TOTAL_RENT, merkleRoot, 0);
-        uint256 p2 = distributor.depositRent(propertyId, TOTAL_RENT, merkleRoot, 0);
+        uint256 p1 = distributor.depositRent(propertyId, TOTAL_RENT, merkleRoot, snapshotBlock);
+        uint256 p2 = distributor.depositRent(propertyId, TOTAL_RENT, merkleRoot, snapshotBlock);
         vm.stopPrank();
 
         uint256[] memory propIds  = new uint256[](2);
@@ -304,7 +336,7 @@ contract RentDistributorTest is Test {
 
     function test_revert_claimMultiple_arrayLengthMismatch() public {
         vm.prank(admin);
-        distributor.depositRent(propertyId, TOTAL_RENT, merkleRoot, 0);
+        distributor.depositRent(propertyId, TOTAL_RENT, merkleRoot, snapshotBlock);
 
         uint256[] memory propIds   = new uint256[](2);
         uint256[] memory periodIds = new uint256[](1); // wrong length
@@ -320,7 +352,7 @@ contract RentDistributorTest is Test {
 
     function test_reclaimUnclaimed_afterDeadline() public {
         vm.prank(admin);
-        uint256 periodId = distributor.depositRent(propertyId, TOTAL_RENT, merkleRoot, 0);
+        uint256 periodId = distributor.depositRent(propertyId, TOTAL_RENT, merkleRoot, snapshotBlock);
 
         // Only alice claims her share
         vm.prank(alice);
@@ -342,7 +374,7 @@ contract RentDistributorTest is Test {
 
     function test_revert_reclaimUnclaimed_tooEarly() public {
         vm.prank(admin);
-        uint256 periodId = distributor.depositRent(propertyId, TOTAL_RENT, merkleRoot, 0);
+        uint256 periodId = distributor.depositRent(propertyId, TOTAL_RENT, merkleRoot, snapshotBlock);
 
         uint256 deadline = block.timestamp + 90 days;
         vm.prank(admin);
@@ -354,7 +386,7 @@ contract RentDistributorTest is Test {
 
     function test_revert_reclaimUnclaimed_notAdmin() public {
         vm.prank(admin);
-        uint256 periodId = distributor.depositRent(propertyId, TOTAL_RENT, merkleRoot, 0);
+        uint256 periodId = distributor.depositRent(propertyId, TOTAL_RENT, merkleRoot, snapshotBlock);
 
         vm.warp(block.timestamp + 91 days);
         vm.prank(alice);
@@ -362,9 +394,9 @@ contract RentDistributorTest is Test {
         distributor.reclaimUnclaimed(propertyId, periodId);
     }
 
-    function test_reclaimUnclaimed_nothingLeftAfterFullDistribution() public {
+    function test_revert_reclaimUnclaimed_nothingLeftAfterFullDistribution() public {
         vm.prank(admin);
-        uint256 periodId = distributor.depositRent(propertyId, TOTAL_RENT, merkleRoot, 0);
+        uint256 periodId = distributor.depositRent(propertyId, TOTAL_RENT, merkleRoot, snapshotBlock);
 
         // All investors claim
         vm.prank(alice); distributor.claimRent(propertyId, periodId, ALICE_AMOUNT, proofAlice);
@@ -374,18 +406,51 @@ contract RentDistributorTest is Test {
 
         vm.warp(block.timestamp + 91 days);
 
-        uint256 adminBefore = usdc.balanceOf(admin);
+        // Nothing left to sweep — reverts rather than emitting a misleading zero-value event.
+        vm.prank(admin);
+        vm.expectRevert(
+            abi.encodeWithSelector(RentDistributor__NothingToReclaim.selector, propertyId, periodId)
+        );
+        distributor.reclaimUnclaimed(propertyId, periodId);
+    }
+
+    function test_revert_reclaimUnclaimed_twice() public {
+        vm.prank(admin);
+        uint256 periodId = distributor.depositRent(propertyId, TOTAL_RENT, merkleRoot, snapshotBlock);
+
+        vm.warp(block.timestamp + 91 days);
         vm.prank(admin);
         distributor.reclaimUnclaimed(propertyId, periodId);
-        // No change; unclaimed = 0
-        assertEq(usdc.balanceOf(admin), adminBefore);
+
+        // Second sweep is rejected outright — previously it silently transferred 0.
+        vm.prank(admin);
+        vm.expectRevert(
+            abi.encodeWithSelector(RentDistributor__PeriodReclaimed.selector, propertyId, periodId)
+        );
+        distributor.reclaimUnclaimed(propertyId, periodId);
+    }
+
+    function test_revert_claimRent_afterReclaim() public {
+        vm.prank(admin);
+        uint256 periodId = distributor.depositRent(propertyId, TOTAL_RENT, merkleRoot, snapshotBlock);
+
+        vm.warp(block.timestamp + 91 days);
+        vm.prank(admin);
+        distributor.reclaimUnclaimed(propertyId, periodId);
+
+        // A late claimant gets an explicit "swept" error, not an opaque over-cap failure.
+        vm.prank(alice);
+        vm.expectRevert(
+            abi.encodeWithSelector(RentDistributor__PeriodReclaimed.selector, propertyId, periodId)
+        );
+        distributor.claimRent(propertyId, periodId, ALICE_AMOUNT, proofAlice);
     }
 
     // ─── Upgrade ─────────────────────────────────────────────────────────────
 
     function test_upgrade_preservesState() public {
         vm.prank(admin);
-        uint256 p1 = distributor.depositRent(propertyId, TOTAL_RENT, merkleRoot, 0);
+        uint256 p1 = distributor.depositRent(propertyId, TOTAL_RENT, merkleRoot, snapshotBlock);
         assertEq(p1, 1);
 
         vm.prank(admin);
@@ -395,7 +460,7 @@ contract RentDistributorTest is Test {
 
         // Period state persisted — second deposit gets periodId = 2
         vm.prank(admin);
-        uint256 p2 = distributor.depositRent(propertyId, TOTAL_RENT, merkleRoot, 0);
+        uint256 p2 = distributor.depositRent(propertyId, TOTAL_RENT, merkleRoot, snapshotBlock);
         assertEq(p2, 2);
 
         // Alice can still claim from period 1 after upgrade
@@ -512,18 +577,76 @@ contract RentDistributorTest is Test {
         distributor.depositRent(propertyId, TOTAL_RENT, merkleRoot, block.number);
     }
 
-    function test_snapshotEnforcement_skippedWhenNoTokenRegistered() public {
-        // With snapshotBlock > 0 but no token registered, claim should proceed via Merkle only
+    /// @dev Previously a depositor could point at a property with no registered token and
+    ///      the entitlement cap would silently evaluate to "no limit". Now rejected up front.
+    function test_revert_depositRent_noTokenRegistered() public {
+        vm.startPrank(admin);
+        uint256 bare = registry.registerProperty("ipfs://QmBare", 1_000 ether, 10e18, address(0), bytes32(0), 0);
+        vm.expectRevert(
+            abi.encodeWithSelector(RentDistributor__NoTokenForProperty.selector, bare)
+        );
+        distributor.depositRent(bare, TOTAL_RENT, merkleRoot, snapshotBlock);
+        vm.stopPrank();
+    }
+
+    /// @dev Likewise a snapshot predating the token's first checkpoint used to disable the cap.
+    function test_revert_depositRent_emptySnapshot() public {
+        vm.startPrank(admin);
+        MockVotesToken fresh = new MockVotesToken("Fresh", "FR");
+        uint256 pid = registry.registerProperty("ipfs://QmFresh", 1_000 ether, 10e18, address(0), bytes32(0), 0);
+        registry.setTokenAddress(pid, address(fresh));
+        vm.stopPrank();
+
+        // Snapshot a block before `fresh` had any supply → no checkpoint → rejected.
         vm.roll(block.number + 1);
-        uint256 snap = block.number - 1;
+        uint256 emptySnap = block.number - 1;
 
         vm.prank(admin);
-        uint256 periodId = distributor.depositRent(propertyId, TOTAL_RENT, merkleRoot, snap);
+        vm.expectRevert(
+            abi.encodeWithSelector(RentDistributor__EmptySnapshot.selector, emptySnap)
+        );
+        distributor.depositRent(pid, TOTAL_RENT, merkleRoot, emptySnap);
+    }
 
-        // Should succeed — tokenAddr is address(0) so snapshot check is skipped
+    function test_revert_depositRent_zeroSnapshotBlock() public {
+        vm.prank(admin);
+        vm.expectRevert(
+            abi.encodeWithSelector(RentDistributor__InvalidSnapshotBlock.selector, uint256(0))
+        );
+        distributor.depositRent(propertyId, TOTAL_RENT, merkleRoot, 0);
+    }
+
+    function test_revert_depositRent_zeroMerkleRoot() public {
+        vm.prank(admin);
+        vm.expectRevert(RentDistributor__ZeroMerkleRoot.selector);
+        distributor.depositRent(propertyId, TOTAL_RENT, bytes32(0), snapshotBlock);
+    }
+
+    /// @dev The cap rounds UP so an allocator distributing truncation dust one wei at a time
+    ///      (largest-remainder) stays inside every holder's cap. With a rent amount that does
+    ///      not divide evenly, alice's exact floor share + 1 wei must still be claimable.
+    function test_snapshotEnforcement_ceilingAbsorbsAllocatorDust() public {
+        uint256 rent = 1_000e18 + 2; // chosen so the pro-rata split does NOT divide evenly
+
+        uint256 numerator  = 600 ether * rent;
+        uint256 floorShare = numerator / 1400 ether;
+        // Guard the premise: with an exact division there would be no dust to absorb
+        // and this test would silently stop exercising the ceiling.
+        assertTrue(numerator % 1400 ether != 0, "rent must not divide evenly");
+
+        uint256 dusted = floorShare + 1; // allocator hands alice one wei of the remainder
+
+        bytes32 lA = _leaf(alice, dusted);
+        bytes32 lB = _leaf(bob, 1);
+        bytes32 root2 = _h(lA, lB);
+        bytes32[] memory proofA = new bytes32[](1); proofA[0] = lB;
+
+        vm.prank(admin);
+        uint256 periodId = distributor.depositRent(propertyId, rent, root2, snapshotBlock);
+
         vm.prank(alice);
-        distributor.claimRent(propertyId, periodId, ALICE_AMOUNT, proofAlice);
-        assertEq(usdc.balanceOf(alice), ALICE_AMOUNT);
+        distributor.claimRent(propertyId, periodId, dusted, proofA);
+        assertEq(usdc.balanceOf(alice), dusted);
     }
 }
 

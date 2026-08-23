@@ -1,60 +1,88 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useWaitForTransactionReceipt } from 'wagmi';
-import { formatUnits, parseUnits } from 'viem';
+import { parseUnits } from 'viem';
 import { KYCGate } from './KYCGate';
 import { useBuyListing, type Listing } from '../lib/hooks/useMarketplace';
+import { cleanTxError, formatTokens, formatUsd } from '../lib/format';
+import { Alert, Badge, Button, Modal } from './ui';
 
 interface BuyModalProps {
-  listing:   Listing;
-  onClose:   () => void;
+  listing: Listing;
+  onClose: () => void;
   onSuccess: () => void;
 }
 
-type Step = 'form' | 'approve' | 'buy' | 'done';
-
-const PAYMENT_TOKEN_DECIMALS = 6;
+function SummaryRow({
+  label,
+  value,
+  emphasis = false,
+}: {
+  label: string;
+  value: string;
+  emphasis?: boolean;
+}) {
+  return (
+    <div className="flex items-baseline justify-between gap-3 text-sm">
+      <span className="text-muted">{label}</span>
+      <span className={`tabular font-semibold ${emphasis ? 'text-accent' : 'text-ink'}`}>{value}</span>
+    </div>
+  );
+}
 
 export function BuyModal({ listing, onClose, onSuccess }: BuyModalProps) {
   const { approve, buy, isPending } = useBuyListing();
 
-  const [qtyInput,     setQtyInput]     = useState('1');
-  const [step,         setStep]         = useState<Step>('form');
-  const [approveHash,  setApproveHash]  = useState<`0x${string}` | undefined>();
-  const [buyHash,      setBuyHash]      = useState<`0x${string}` | undefined>();
-  const [txError,      setTxError]      = useState('');
+  const [qtyInput, setQtyInput] = useState('1');
+  const [approveHash, setApproveHash] = useState<`0x${string}` | undefined>();
+  const [buyHash, setBuyHash] = useState<`0x${string}` | undefined>();
+  const [txError, setTxError] = useState('');
+  const [done, setDone] = useState(false);
 
-  const { isLoading: waitingApprove, isSuccess: approveSuccess } = useWaitForTransactionReceipt({ hash: approveHash });
-  const { isLoading: waitingBuy,     isSuccess: buySuccess     } = useWaitForTransactionReceipt({ hash: buyHash    });
+  const { isLoading: waitingApprove, isSuccess: approveSuccess } = useWaitForTransactionReceipt({
+    hash: approveHash,
+  });
+  const { isLoading: waitingBuy, isSuccess: buySuccess } = useWaitForTransactionReceipt({
+    hash: buyHash,
+  });
 
+  // Listing token amounts are 18-decimal.
   const qtyBig = useMemo(() => {
     try {
-      const n = parseUnits(qtyInput, 18);
+      const n = parseUnits(qtyInput || '0', 18);
       return n > 0n ? n : 0n;
-    } catch { return 0n; }
+    } catch {
+      return 0n;
+    }
   }, [qtyInput]);
 
-  const totalCostRaw = qtyBig > 0n ? qtyBig * listing.pricePerToken / 10n ** 18n : 0n;
-
-  // pricePerToken is 18-decimal; totalCostRaw is 18-decimal USD
-  // convert to USDC (6 decimals) for approve amount
-  const totalCostUSDC = totalCostRaw / 10n ** 12n; // 18 → 6 decimals
+  const totalCost18 = qtyBig > 0n ? (qtyBig * listing.pricePerToken) / 10n ** 18n : 0n;
+  // The payment token is USDC (6 decimals); approve in its own units.
+  const totalCostUSDC = totalCost18 / 10n ** 12n;
 
   const validationError = useMemo(() => {
-    if (qtyBig <= 0n) return 'Enter a quantity.';
-    if (qtyBig > listing.tokenAmount) return `Max available: ${formatUnits(listing.tokenAmount, 18).replace(/\.?0+$/, '')}`;
+    if (qtyBig <= 0n) return 'Enter a quantity greater than zero.';
+    if (qtyBig > listing.tokenAmount)
+      return `Only ${formatTokens(listing.tokenAmount)} tokens are listed.`;
     return null;
   }, [qtyBig, listing.tokenAmount]);
+
+  // Fire the success callback from an effect, never during render.
+  useEffect(() => {
+    if (buySuccess && !done) {
+      setDone(true);
+      onSuccess();
+    }
+  }, [buySuccess, done, onSuccess]);
 
   const handleApprove = async () => {
     setTxError('');
     try {
       const hash = await approve(totalCostUSDC > 0n ? totalCostUSDC : 1n);
       setApproveHash(hash);
-      setStep('approve');
     } catch (e) {
-      setTxError(e instanceof Error ? e.message.slice(0, 140) : 'Approval failed');
+      setTxError(cleanTxError(e));
     }
   };
 
@@ -63,142 +91,121 @@ export function BuyModal({ listing, onClose, onSuccess }: BuyModalProps) {
     try {
       const hash = await buy(listing.listingId, qtyBig);
       setBuyHash(hash);
-      setStep('buy');
     } catch (e) {
-      setTxError(e instanceof Error ? e.message.slice(0, 140) : 'Purchase failed');
+      setTxError(cleanTxError(e));
     }
   };
 
-  if (buySuccess && step !== 'done') {
-    setStep('done');
-    onSuccess();
+  if (done) {
+    return (
+      <Modal title="Purchase complete" onClose={onClose}>
+        <div className="py-4 text-center">
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full border border-positive/30 bg-positive/10 text-positive">
+            <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+              <path d="m6 12.5 4 4 8-8" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </div>
+          <p className="mt-4 font-display text-base font-semibold text-ink">
+            {formatTokens(qtyBig)} tokens purchased
+          </p>
+          <p className="mt-1.5 text-sm text-muted">
+            Your position will appear in your portfolio once the balance settles.
+          </p>
+          <Button className="mt-6" onClick={onClose}>
+            Done
+          </Button>
+        </div>
+      </Modal>
+    );
   }
 
-  const priceDisplay = parseFloat(formatUnits(listing.pricePerToken, 18)).toLocaleString('en-US', {
-    minimumFractionDigits: 2, maximumFractionDigits: 2,
-  });
-  const totalDisplay = parseFloat(formatUnits(totalCostRaw, 18)).toLocaleString('en-US', {
-    minimumFractionDigits: 2, maximumFractionDigits: 2,
-  });
-  const availableDisplay = formatUnits(listing.tokenAmount, 18).replace(/\.?0+$/, '');
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-      <div className="w-full max-w-md rounded-2xl bg-white shadow-xl">
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-          <h2 className="text-lg font-semibold text-gray-900">Buy Tokens</h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
+    <Modal
+      title="Buy tokens"
+      description={`Listing #${listing.listingId.toString()} · settles in USDC`}
+      onClose={onClose}
+    >
+      <div className="space-y-4">
+        {/* Listing summary */}
+        <div className="space-y-2 rounded-xl border border-hairline bg-elevated/50 px-4 py-3">
+          <SummaryRow label="Available" value={`${formatTokens(listing.tokenAmount)} tokens`} />
+          <SummaryRow label="Price per token" value={formatUsd(listing.pricePerToken)} />
         </div>
 
-        <div className="px-6 py-5 space-y-4">
-          {step === 'done' ? (
-            <div className="text-center py-6">
-              <div className="text-4xl mb-3">✅</div>
-              <p className="font-semibold text-gray-900">Purchase complete!</p>
-              <p className="text-sm text-gray-500 mt-1">
-                Tokens will appear in your portfolio.
-              </p>
-              <button onClick={onClose} className="mt-6 rounded-lg bg-indigo-600 px-6 py-2 text-sm font-semibold text-white hover:bg-indigo-700">
-                Close
-              </button>
-            </div>
-          ) : (
-            <>
-              {/* Listing summary */}
-              <div className="rounded-lg bg-gray-50 px-4 py-3 space-y-1.5 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-gray-500">Listing</span>
-                  <span className="font-medium">#{listing.listingId.toString()}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-500">Available</span>
-                  <span className="font-medium">{availableDisplay} tokens</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-500">Price / token</span>
-                  <span className="font-medium">${priceDisplay}</span>
-                </div>
-              </div>
+        {/* Quantity */}
+        <div>
+          <div className="mb-1.5 flex items-baseline justify-between">
+            <label htmlFor="buy-qty" className="text-[11px] font-semibold uppercase tracking-wider text-faint">
+              Quantity to buy
+            </label>
+            <button
+              type="button"
+              onClick={() => setQtyInput(formatTokens(listing.tokenAmount).replace(/,/g, ''))}
+              className="text-[11px] font-semibold text-accent transition-colors hover:text-accent-hover"
+            >
+              Max
+            </button>
+          </div>
+          <input
+            id="buy-qty"
+            type="number"
+            min="0"
+            step="any"
+            value={qtyInput}
+            onChange={(e) => {
+              setQtyInput(e.target.value);
+              setTxError('');
+            }}
+            className="tabular h-11 w-full rounded-xl border border-hairline bg-elevated px-3 text-base text-ink placeholder:text-faint transition-colors hover:border-edge focus:border-accent/60 focus:outline-none focus:ring-2 focus:ring-accent/25"
+          />
+        </div>
 
-              {/* Quantity input */}
-              <div>
-                <label className="block text-xs font-semibold text-gray-600 mb-1">
-                  Quantity to Buy
-                </label>
-                <input
-                  type="number"
-                  min="1"
-                  step="any"
-                  value={qtyInput}
-                  onChange={(e) => setQtyInput(e.target.value)}
-                  className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
-              </div>
+        {/* Total */}
+        <div className="rounded-xl border border-accent/20 bg-accent/[0.07] px-4 py-3">
+          <SummaryRow label="Total to pay" value={formatUsd(totalCost18)} emphasis />
+        </div>
 
-              {/* Total */}
-              <div className="rounded-lg bg-indigo-50 px-4 py-3 flex justify-between text-sm">
-                <span className="text-gray-600 font-medium">Total USDC</span>
-                <span className="font-semibold text-indigo-700">${totalDisplay}</span>
-              </div>
+        {validationError && <Alert tone="warn">{validationError}</Alert>}
+        {txError && <Alert tone="negative">{txError}</Alert>}
 
-              {/* Validation */}
-              {validationError && (
-                <p className="text-xs text-amber-600">{validationError}</p>
-              )}
-
-              {txError && (
-                <p className="text-xs text-red-600 leading-tight">{txError}</p>
-              )}
-
-              {/* KYC-gated buy actions */}
-              <KYCGate
-                fallback={
-                  <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-700">
-                    KYC verification required to purchase tokens.
-                  </p>
-                }
+        {/* Two-step, KYC-gated */}
+        <KYCGate
+          fallback={
+            <Alert tone="warn" title="Verification required">
+              The marketplace only settles between wallets in the on-chain identity registry.
+            </Alert>
+          }
+        >
+          <div className="space-y-2">
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                variant={approveSuccess ? 'secondary' : 'outline'}
+                disabled={!!validationError || isPending || approveSuccess}
+                loading={waitingApprove}
+                onClick={() => void handleApprove()}
               >
-                <div className="flex gap-3">
-                  {/* Step 1: Approve USDC */}
-                  <button
-                    onClick={() => void handleApprove()}
-                    disabled={!!validationError || isPending || waitingApprove || approveSuccess}
-                    className="flex-1 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-sm font-semibold text-indigo-700 hover:bg-indigo-100 disabled:opacity-50 transition-colors"
-                  >
-                    {waitingApprove ? (
-                      <span className="flex items-center justify-center gap-1.5">
-                        <span className="h-3.5 w-3.5 rounded-full border-2 border-indigo-400 border-t-transparent animate-spin" />
-                        Confirming…
-                      </span>
-                    ) : approveSuccess ? (
-                      '✓ Approved'
-                    ) : (
-                      '1. Approve USDC'
-                    )}
-                  </button>
+                {approveSuccess ? '✓ Approved' : waitingApprove ? 'Confirming…' : '1 · Approve'}
+              </Button>
+              <Button
+                disabled={!!validationError || !approveSuccess || isPending}
+                loading={waitingBuy}
+                onClick={() => void handleBuy()}
+              >
+                {waitingBuy ? 'Confirming…' : '2 · Buy'}
+              </Button>
+            </div>
+            <p className="text-center text-[11px] text-faint">
+              {approveSuccess
+                ? 'Allowance set — complete the purchase'
+                : 'Approve the marketplace to spend your USDC first'}
+            </p>
+          </div>
+        </KYCGate>
 
-                  {/* Step 2: Buy */}
-                  <button
-                    onClick={() => void handleBuy()}
-                    disabled={!!validationError || !approveSuccess || isPending || waitingBuy}
-                    className="flex-1 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50 transition-colors"
-                  >
-                    {waitingBuy ? (
-                      <span className="flex items-center justify-center gap-1.5">
-                        <span className="h-3.5 w-3.5 rounded-full border-2 border-white border-t-transparent animate-spin" />
-                        Confirming…
-                      </span>
-                    ) : (
-                      '2. Buy'
-                    )}
-                  </button>
-                </div>
-              </KYCGate>
-            </>
-          )}
+        <div className="flex items-center justify-center gap-2 pt-1">
+          <Badge tone="neutral">Lockups and transfer rules still apply after purchase</Badge>
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }

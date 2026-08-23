@@ -1,35 +1,55 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import { useAccount, useReadContract, useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
+import { isAddress } from 'viem';
 import { useRequireAdmin } from '@/lib/hooks/useAdminRole';
 import { usePropertyCount, useProperties } from '@/lib/hooks/useProperties';
 import { MarketplaceABI } from '@/lib/contracts/abis';
 import { useContracts } from '@/lib/contracts/useContracts';
-import AdminProperties from './AdminProperties';
+import { cn } from '@/lib/cn';
+import { shortAddress } from '@/lib/format';
+import { PropertyStatus } from '@/lib/types';
+import {
+  Alert,
+  Button,
+  Card,
+  CardBody,
+  CardHeader,
+  CardTitle,
+  Container,
+  EmptyState,
+  Field,
+  Input,
+  PageHeader,
+  Spinner,
+} from '@/components/ui';
+import AdminProperties, { type PropertyRow } from './AdminProperties';
 import AdminKYC from './AdminKYC';
 
 type Tab = 'properties' | 'kyc' | 'fees';
 
-type PropertyRow = {
-  id: string;
-  owner: string;
-  metadataURI: string;
-  status: number;
-  totalSupply: string;
-  pricePerToken: string;
-};
+const TABS: { key: Tab; label: string }[] = [
+  { key: 'properties', label: 'Properties' },
+  { key: 'kyc', label: 'Investors & KYC' },
+  { key: 'fees', label: 'Protocol fees' },
+];
 
 export default function AdminPage() {
   const { isConnected } = useAccount();
   const { isAdmin, isLoading: roleLoading } = useRequireAdmin('/');
   const [tab, setTab] = useState<Tab>('properties');
 
-  // ─── Properties via direct RPC ────────────────────────────────────────────
   const { data: countData } = usePropertyCount();
   const count = countData ? Number(countData) : 0;
   const { properties: rawProperties, refetch: refetchProperties } = useProperties(count);
+
+  // Self-serve listings arrive here as submissions, so surface the queue depth
+  // on the tab itself — an admin should not have to open a table to notice.
+  const pendingReview = rawProperties.filter(
+    (p) => Number(p.status) === PropertyStatus.UnderReview,
+  ).length;
 
   const propertyRows: PropertyRow[] = rawProperties.map((p) => ({
     id: p.propertyId.toString(),
@@ -38,84 +58,94 @@ export default function AdminPage() {
     status: Number(p.status),
     totalSupply: p.totalSupply.toString(),
     pricePerToken: p.pricePerToken.toString(),
+    tokenAddress: p.tokenAddress,
   }));
 
-  const handleRefetch = useCallback(() => { refetchProperties(); }, [refetchProperties]);
+  const handleRefetch = useCallback(() => {
+    void refetchProperties();
+  }, [refetchProperties]);
 
-  // ─── Gate: wallet not connected ───────────────────────────────────────────
   if (!isConnected) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[calc(100vh-65px)] gap-6">
-        <p className="text-gray-500">Connect your wallet to access the admin panel.</p>
-        <ConnectButton />
-      </div>
+      <Container className="py-20">
+        <EmptyState
+          title="Admin access"
+          description="Connect the wallet holding DEFAULT_ADMIN_ROLE to manage the registry."
+          action={<ConnectButton />}
+        />
+      </Container>
     );
   }
 
-  // ─── Gate: role check in progress ─────────────────────────────────────────
   if (roleLoading) {
     return (
-      <div className="flex items-center justify-center min-h-[calc(100vh-65px)]">
-        <span className="text-gray-400 animate-pulse">Checking permissions…</span>
-      </div>
+      <Container className="flex items-center justify-center gap-2 py-24 text-sm text-muted">
+        <Spinner /> Checking on-chain permissions…
+      </Container>
     );
   }
 
-  // ─── Gate: not admin (redirect handled by useRequireAdmin) ────────────────
   if (!isAdmin) {
     return (
-      <div className="flex items-center justify-center min-h-[calc(100vh-65px)]">
-        <span className="text-red-500">Access denied — DEFAULT_ADMIN_ROLE required.</span>
-      </div>
+      <Container className="py-20">
+        <EmptyState
+          title="Access denied"
+          description="This wallet does not hold DEFAULT_ADMIN_ROLE on the registry."
+        />
+      </Container>
     );
   }
 
-  // ─── Admin UI ─────────────────────────────────────────────────────────────
-  const tabs: { key: Tab; label: string }[] = [
-    { key: 'properties', label: 'Properties' },
-    { key: 'kyc',        label: 'KYC' },
-    { key: 'fees',       label: 'Fees' },
-  ];
-
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-10">
-      <h1 className="text-2xl font-bold text-gray-900 mb-1">Admin Panel</h1>
-      <p className="text-sm text-gray-500 mb-8">Manage properties, KYC, and protocol fees.</p>
+    <>
+      <PageHeader
+        title="Admin panel"
+        description="Move properties through their lifecycle, manage investor verification, and set marketplace fees."
+      />
 
-      {/* Tab bar */}
-      <div className="flex gap-1 border-b border-gray-200 mb-8">
-        {tabs.map((t) => (
-          <button
-            key={t.key}
-            onClick={() => setTab(t.key)}
-            className={[
-              'px-4 py-2 text-sm font-medium rounded-t-md transition-colors',
-              tab === t.key
-                ? 'border border-b-white border-gray-200 text-indigo-600 -mb-px bg-white'
-                : 'text-gray-500 hover:text-gray-700',
-            ].join(' ')}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+      <Container className="py-8 sm:py-10">
+        {/* Tabs */}
+        <div
+          role="tablist"
+          aria-label="Admin sections"
+          className="inline-flex gap-1 rounded-xl border border-hairline bg-surface p-1"
+        >
+          {TABS.map((t) => (
+            <button
+              key={t.key}
+              role="tab"
+              aria-selected={tab === t.key}
+              onClick={() => setTab(t.key)}
+              className={cn(
+                'rounded-lg px-4 py-2 text-sm font-medium transition-colors',
+                tab === t.key
+                  ? 'bg-accent/12 text-accent'
+                  : 'text-muted hover:bg-elevated hover:text-ink',
+              )}
+            >
+              {t.label}
+              {t.key === 'properties' && pendingReview > 0 && (
+                <span className="ml-2 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-warn/20 px-1.5 text-[11px] font-semibold text-warn">
+                  {pendingReview}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
 
-      {/* Tab content */}
-      {tab === 'properties' && (
-        <AdminProperties
-          properties={propertyRows}
-          onRefetch={handleRefetch}
-        />
-      )}
-
-      {tab === 'kyc' && <AdminKYC />}
-
-      {tab === 'fees' && <FeesTab />}
-    </div>
+        <div className="mt-6">
+          {tab === 'properties' && (
+            <AdminProperties properties={propertyRows} onRefetch={handleRefetch} />
+          )}
+          {tab === 'kyc' && <AdminKYC />}
+          {tab === 'fees' && <FeesTab />}
+        </div>
+      </Container>
+    </>
   );
 }
 
-// ─── Fees tab (inline — simple enough to not warrant a separate file) ─────────
+// ─── Fees tab ────────────────────────────────────────────────────────────────
 
 function FeesTab() {
   const { addresses } = useContracts();
@@ -125,117 +155,138 @@ function FeesTab() {
   const { data: currentFeeBps } = useReadContract({
     address: addresses.marketplace,
     abi: MarketplaceABI,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     functionName: 'feeBps' as any,
   });
 
   const { data: currentFeeCollector } = useReadContract({
     address: addresses.marketplace,
     abi: MarketplaceABI,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     functionName: 'feeCollector' as any,
   });
 
-  const [newFeeBps, setNewFeeBps]           = useState('');
+  const [newFeeBps, setNewFeeBps] = useState('');
   const [newFeeCollector, setNewFeeCollector] = useState('');
-  const [feeError, setFeeError]             = useState('');
+  const [feeError, setFeeError] = useState('');
   const [collectorError, setCollectorError] = useState('');
 
   const busy = isPending || isConfirming;
 
   function handleSetFee() {
-    const bps = parseInt(newFeeBps);
-    if (isNaN(bps) || bps < 0 || bps > 1000) {
-      setFeeError('Enter a value between 0 and 1000 bps (0–10%)');
+    const bps = parseInt(newFeeBps, 10);
+    if (Number.isNaN(bps) || bps < 0 || bps > 1000) {
+      setFeeError('Enter a value between 0 and 1000 bps (0–10%).');
       return;
     }
     setFeeError('');
     writeContract({
       address: addresses.marketplace,
       abi: MarketplaceABI,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       functionName: 'setFee' as any,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       args: [bps] as any,
     });
   }
 
   function handleSetCollector() {
-    const { isAddress } = require('viem');
     if (!isAddress(newFeeCollector)) {
-      setCollectorError('Invalid address');
+      setCollectorError('Not a valid Ethereum address.');
       return;
     }
     setCollectorError('');
     writeContract({
       address: addresses.marketplace,
       abi: MarketplaceABI,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       functionName: 'setFeeCollector' as any,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       args: [newFeeCollector as `0x${string}`] as any,
     });
   }
 
   return (
-    <div className="space-y-6 max-w-lg">
-      {/* Current settings */}
-      <div className="rounded-xl border border-gray-200 bg-white p-6">
-        <h3 className="text-base font-semibold text-gray-800 mb-4">Current Fee Settings</h3>
-        <dl className="space-y-3 text-sm">
-          <div className="flex justify-between">
-            <dt className="text-gray-500">Protocol Fee</dt>
-            <dd className="font-medium text-gray-800">
-              {currentFeeBps != null ? `${Number(currentFeeBps) / 100}% (${currentFeeBps} bps)` : '—'}
-            </dd>
+    <div className="grid max-w-4xl gap-5 lg:grid-cols-2">
+      {/* Current state */}
+      <Card className="lg:col-span-2">
+        <CardHeader>
+          <CardTitle>Current marketplace fee</CardTitle>
+        </CardHeader>
+        <CardBody className="grid gap-5 sm:grid-cols-2">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-faint">
+              Protocol fee
+            </p>
+            <p className="tabular mt-1 font-display text-2xl font-semibold text-ink">
+              {currentFeeBps != null ? `${Number(currentFeeBps) / 100}%` : '—'}
+            </p>
+            {currentFeeBps != null && (
+              <p className="mt-0.5 text-xs text-muted">{String(currentFeeBps)} bps</p>
+            )}
           </div>
-          <div className="flex justify-between">
-            <dt className="text-gray-500">Fee Collector</dt>
-            <dd className="font-mono text-xs text-gray-700 break-all">
-              {currentFeeCollector ? String(currentFeeCollector) : '—'}
-            </dd>
+          <div className="min-w-0">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-faint">
+              Fee collector
+            </p>
+            <p className="mt-1 break-all font-mono text-sm text-ink">
+              {currentFeeCollector ? shortAddress(String(currentFeeCollector), 8) : '—'}
+            </p>
           </div>
-        </dl>
-      </div>
+        </CardBody>
+      </Card>
 
-      {/* Set fee bps */}
-      <div className="rounded-xl border border-gray-200 bg-white p-6 space-y-3">
-        <h3 className="text-base font-semibold text-gray-800">Update Fee (bps)</h3>
-        <div className="flex gap-2">
-          <input
-            type="number"
-            min={0}
-            max={1000}
-            placeholder="e.g. 250"
-            value={newFeeBps}
-            onChange={(e) => setNewFeeBps(e.target.value)}
-            className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-          />
-          <button
-            disabled={busy}
-            onClick={handleSetFee}
-            className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50 transition-colors"
-          >
-            {busy ? '…' : 'Set'}
-          </button>
-        </div>
-        {feeError && <p className="text-xs text-red-500">{feeError}</p>}
-      </div>
+      {/* Update fee */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Update fee</CardTitle>
+        </CardHeader>
+        <CardBody className="space-y-3">
+          <Field label="New fee" htmlFor="fee-bps" hint="basis points, max 1000" error={feeError}>
+            <Input
+              id="fee-bps"
+              type="number"
+              min={0}
+              max={1000}
+              placeholder="250"
+              value={newFeeBps}
+              onChange={(e) => setNewFeeBps(e.target.value)}
+              className="tabular"
+            />
+          </Field>
+          <Button fullWidth loading={busy} onClick={handleSetFee}>
+            Set fee
+          </Button>
+        </CardBody>
+      </Card>
 
-      {/* Set fee collector */}
-      <div className="rounded-xl border border-gray-200 bg-white p-6 space-y-3">
-        <h3 className="text-base font-semibold text-gray-800">Update Fee Collector</h3>
-        <div className="flex gap-2">
-          <input
-            type="text"
-            placeholder="0x…"
-            value={newFeeCollector}
-            onChange={(e) => setNewFeeCollector(e.target.value)}
-            className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500"
-          />
-          <button
-            disabled={busy}
-            onClick={handleSetCollector}
-            className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50 transition-colors"
-          >
-            {busy ? '…' : 'Set'}
-          </button>
-        </div>
-        {collectorError && <p className="text-xs text-red-500">{collectorError}</p>}
+      {/* Update collector */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Update fee collector</CardTitle>
+        </CardHeader>
+        <CardBody className="space-y-3">
+          <Field label="Collector address" htmlFor="fee-collector" error={collectorError}>
+            <Input
+              id="fee-collector"
+              placeholder="0x…"
+              value={newFeeCollector}
+              onChange={(e) => setNewFeeCollector(e.target.value)}
+              className="font-mono text-xs"
+              spellCheck={false}
+            />
+          </Field>
+          <Button fullWidth loading={busy} onClick={handleSetCollector}>
+            Set collector
+          </Button>
+        </CardBody>
+      </Card>
+
+      <div className="lg:col-span-2">
+        <Alert tone="warn" title="These writes take effect immediately">
+          Fee changes apply to every subsequent marketplace settlement. Both calls require
+          DEFAULT_ADMIN_ROLE.
+        </Alert>
       </div>
     </div>
   );

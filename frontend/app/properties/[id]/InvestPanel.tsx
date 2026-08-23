@@ -1,167 +1,111 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useAccount, useReadContract } from 'wagmi';
+import { ConnectButton } from '@rainbow-me/rainbowkit';
+import { formatUnits, parseUnits } from 'viem';
 import { useOfferingData, useMyInvestment, useInvest } from '@/lib/hooks/useOffering';
+import { useHasClaimedTokens, useClaimTokens } from '@/lib/hooks/useOffering';
+import { useOfferingTerms, usePaymentDecimals } from '@/lib/hooks/useCreateOffering';
+import { useTokenInfo } from '@/lib/hooks/useTokenAdmin';
 import { KYCRegistryABI, ERC20ABI } from '@/lib/contracts/abis';
 import { useContracts } from '@/lib/contracts/useContracts';
 import { PropertyStatus, type Property } from '@/lib/types';
+import { AddToWalletButton } from '@/components/AddToWalletButton';
+import { SelfVerifyButton } from '@/components/SelfVerifyButton';
+import {
+  cleanTxError,
+  formatDate,
+  formatTokens,
+  formatUsd,
+  isZeroAddress,
+  pctOf,
+  ZERO_ADDRESS,
+} from '@/lib/format';
+import { Alert, Badge, Button, Progress } from '@/components/ui';
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+/** Property tokens are 18-decimal, and `invest()` takes token WEI, not whole tokens. */
+const TOKEN_DECIMALS = 18;
+const TOKEN_SCALE = 10n ** BigInt(TOKEN_DECIMALS);
 
-function formatUsd(wei: bigint): string {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 2,
-  }).format(Number(wei) / 1e18);
+/** Fractional token amounts are allowed; the contract works in wei throughout. */
+function parseTokenInput(raw: string): bigint {
+  const trimmed = raw.trim();
+  if (!trimmed) return 0n;
+  try {
+    const wei = parseUnits(trimmed, TOKEN_DECIMALS);
+    return wei > 0n ? wei : 0n;
+  } catch {
+    return 0n;
+  }
 }
 
-function formatDate(unixSec: bigint): string {
-  if (unixSec === 0n) return '—';
-  return new Date(Number(unixSec) * 1000).toLocaleDateString('en-US', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  });
+/**
+ * Payment due for `tokenWei`, rounding UP — the same `mulDiv(..., Ceil)` the
+ * offering applies, so the approval we request is never a wei short of what
+ * `invest()` pulls.
+ */
+function costFor(tokenWei: bigint, pricePerToken: bigint): bigint {
+  const numerator = tokenWei * pricePerToken;
+  if (numerator === 0n) return 0n;
+  return (numerator + TOKEN_SCALE - 1n) / TOKEN_SCALE;
 }
 
-// ─── Progress bar ─────────────────────────────────────────────────────────────
-
-function ProgressBar({
-  committed,
-  total,
-}: {
-  committed: bigint;
-  total: bigint;
-}) {
-  const pct = total > 0n ? Number((committed * 10000n) / total) / 100 : 0;
-  return (
-    <div className="space-y-1">
-      <div className="flex justify-between text-xs text-gray-500">
-        <span>{committed.toLocaleString()} committed</span>
-        <span>{pct.toFixed(1)}%</span>
-      </div>
-      <div className="w-full bg-gray-100 rounded-full h-2">
-        <div
-          className="bg-indigo-600 h-2 rounded-full transition-all"
-          style={{ width: `${Math.min(pct, 100)}%` }}
-        />
-      </div>
-      <p className="text-xs text-gray-400 text-right">
-        of {total.toLocaleString()} total tokens
-      </p>
-    </div>
-  );
-}
-
-// ─── Tx button ───────────────────────────────────────────────────────────────
-
-function TxButton({
+function PanelRow({
   label,
-  loading,
-  disabled,
-  onClick,
-  variant = 'primary',
+  value,
+  emphasis = false,
 }: {
   label: string;
-  loading?: boolean;
-  disabled?: boolean;
-  onClick: () => void;
-  variant?: 'primary' | 'outline';
+  value: string;
+  emphasis?: boolean;
 }) {
-  const base =
-    'w-full rounded-lg px-4 py-3 text-sm font-semibold transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed';
-  const styles =
-    variant === 'primary'
-      ? 'bg-indigo-600 text-white hover:bg-indigo-700'
-      : 'border border-indigo-600 text-indigo-600 hover:bg-indigo-50';
-
   return (
-    <button
-      className={`${base} ${styles}`}
-      disabled={disabled || loading}
-      onClick={onClick}
-    >
-      {loading && (
-        <svg
-          className="animate-spin h-4 w-4"
-          viewBox="0 0 24 24"
-          fill="none"
-        >
-          <circle
-            className="opacity-25"
-            cx="12"
-            cy="12"
-            r="10"
-            stroke="currentColor"
-            strokeWidth="4"
-          />
-          <path
-            className="opacity-75"
-            fill="currentColor"
-            d="M4 12a8 8 0 018-8v8H4z"
-          />
-        </svg>
-      )}
-      {label}
-    </button>
-  );
-}
-
-// ─── KYC placeholder (Part 5 will replace this) ──────────────────────────────
-
-function KYCGatePlaceholder() {
-  return (
-    <div className="rounded-xl border border-yellow-200 bg-yellow-50 p-4 text-sm text-yellow-800">
-      <p className="font-semibold mb-1">KYC Required</p>
-      <p>
-        You must complete identity verification before investing. KYC portal
-        coming in Part 5.
-      </p>
+    <div className="flex items-baseline justify-between gap-3 text-sm">
+      <span className="text-muted">{label}</span>
+      <span className={`tabular font-semibold ${emphasis ? 'text-accent' : 'text-ink'}`}>{value}</span>
     </div>
   );
 }
 
-// ─── InvestPanel ─────────────────────────────────────────────────────────────
-
 export function InvestPanel({ property }: { property: Property }) {
-  const { address: account } = useAccount();
+  const { address: account, isConnected } = useAccount();
   const { addresses } = useContracts();
 
-  const offeringAddress =
-    property.offeringContract !== '0x0000000000000000000000000000000000000000'
-      ? property.offeringContract
-      : undefined;
+  const offeringAddress = !isZeroAddress(property.offeringContract)
+    ? property.offeringContract
+    : undefined;
 
-  // Offering state
   const { totalTokensCommitted, finalized, cancelled, refetch: refetchOffering } =
     useOfferingData(offeringAddress);
 
-  // My investment
-  const { tokenAmount: myTokens, lockupExpiry } = useMyInvestment(
-    offeringAddress,
-    account,
+  // The offering's own immutable terms — NOT the registry's display figures. The
+  // registry counts supply in whole tokens and quotes price at 18 decimals, while
+  // the offering works in token wei and payment-token units.
+  const terms = useOfferingTerms(offeringAddress);
+  const { decimals: payDecimals } = usePaymentDecimals();
+
+  const { tokenAmount: myTokens, lockupExpiry } = useMyInvestment(offeringAddress, account);
+  const { hasClaimed, refetch: refetchClaimed } = useHasClaimedTokens(offeringAddress, account);
+  const { claim, isPending: claiming, isSuccess: claimSuccess } = useClaimTokens(offeringAddress);
+
+  const tokenInfo = useTokenInfo(
+    !isZeroAddress(property.tokenAddress) ? property.tokenAddress : undefined,
   );
 
-  // KYC check
-  const { data: isVerified } = useReadContract({
+  const { data: isVerified, refetch: refetchVerified } = useReadContract({
     address: addresses.kycRegistry,
     abi: KYCRegistryABI,
     functionName: 'isVerified',
-    args: [account ?? '0x0000000000000000000000000000000000000000'],
+    args: [account ?? ZERO_ADDRESS],
     query: { enabled: !!account },
   });
 
-  // Allowance check
   const { data: allowanceRaw, refetch: refetchAllowance } = useReadContract({
     address: addresses.paymentToken,
     abi: ERC20ABI,
     functionName: 'allowance',
-    args: [
-      account ?? '0x0000000000000000000000000000000000000000',
-      offeringAddress ?? '0x0000000000000000000000000000000000000000',
-    ],
+    args: [account ?? ZERO_ADDRESS, offeringAddress ?? ZERO_ADDRESS],
     query: { enabled: !!account && !!offeringAddress },
   });
   const allowance = (allowanceRaw as bigint | undefined) ?? 0n;
@@ -169,36 +113,56 @@ export function InvestPanel({ property }: { property: Property }) {
   const { approve, invest, refund, isPending, isInvestSuccess, isRefundSuccess, error } =
     useInvest(offeringAddress);
 
-  // Form state
   const [tokenInput, setTokenInput] = useState('');
   const [txError, setTxError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
-  const tokensAvailable = property.totalSupply - totalTokensCommitted;
-  const tokenAmount = BigInt(tokenInput || '0');
-  const totalCost = tokenAmount * property.pricePerToken; // in payment token units (18 dec)
-
+  const tokenAmount = useMemo(() => parseTokenInput(tokenInput), [tokenInput]);
+  const tokensAvailable =
+    terms.hardCap > totalTokensCommitted ? terms.hardCap - totalTokensCommitted : 0n;
+  const totalCost = costFor(tokenAmount, terms.pricePerToken);
   const needsApprove = allowance < totalCost && tokenAmount > 0n;
+  const fundedPct = pctOf(totalTokensCommitted, terms.hardCap);
+  const softCapMet = terms.softCap > 0n && totalTokensCommitted >= terms.softCap;
+
+  // The registry status can lag the offering's own clock, so check both.
+  const nowSeconds = BigInt(Math.floor(Date.now() / 1000));
+  const withinWindow =
+    terms.startTime > 0n && nowSeconds >= terms.startTime && nowSeconds <= terms.endTime;
+  const isOpen =
+    property.status === PropertyStatus.OfferingOpen &&
+    !cancelled &&
+    !finalized &&
+    withinWindow;
+
+  /** Finalized, holds an allocation, hasn't pulled it yet — tokens are waiting. */
+  const canClaim = finalized && !cancelled && myTokens > 0n && !hasClaimed;
 
   useEffect(() => {
     if (isInvestSuccess) {
-      setSuccessMsg(
-        `Investment confirmed! Lockup expires ${formatDate(lockupExpiry)}.`,
-      );
-      refetchOffering();
-      refetchAllowance();
+      setSuccessMsg('Commitment confirmed. Tokens are claimable once the raise is finalised.');
+      setTokenInput('');
+      void refetchOffering();
+      void refetchAllowance();
     }
-  }, [isInvestSuccess, lockupExpiry, refetchOffering, refetchAllowance]);
+  }, [isInvestSuccess, refetchOffering, refetchAllowance]);
 
   useEffect(() => {
     if (isRefundSuccess) {
       setSuccessMsg('Refund claimed successfully.');
-      refetchOffering();
+      void refetchOffering();
     }
   }, [isRefundSuccess, refetchOffering]);
 
   useEffect(() => {
-    if (error) setTxError((error as Error).message.slice(0, 120));
+    if (claimSuccess) {
+      setSuccessMsg('Tokens minted to your wallet.');
+      refetchClaimed();
+    }
+  }, [claimSuccess, refetchClaimed]);
+
+  useEffect(() => {
+    if (error) setTxError(cleanTxError(error));
   }, [error]);
 
   const handleApprove = async () => {
@@ -207,24 +171,24 @@ export function InvestPanel({ property }: { property: Property }) {
       await approve(totalCost);
       await refetchAllowance();
     } catch (e) {
-      setTxError((e as Error).message.slice(0, 120));
+      setTxError(cleanTxError(e));
     }
   };
 
   const handleInvest = async () => {
     setTxError(null);
     if (tokenAmount <= 0n) {
-      setTxError('Enter a valid token amount.');
+      setTxError('Enter an amount above zero.');
       return;
     }
     if (tokenAmount > tokensAvailable) {
-      setTxError(`Max available: ${tokensAvailable.toLocaleString()} tokens.`);
+      setTxError(`Only ${formatTokens(tokensAvailable)} tokens remain in this offering.`);
       return;
     }
     try {
       await invest(tokenAmount);
     } catch (e) {
-      setTxError((e as Error).message.slice(0, 120));
+      setTxError(cleanTxError(e));
     }
   };
 
@@ -233,169 +197,263 @@ export function InvestPanel({ property }: { property: Property }) {
     try {
       await refund();
     } catch (e) {
-      setTxError((e as Error).message.slice(0, 120));
+      setTxError(cleanTxError(e));
     }
   };
 
-  // ─── Render ────────────────────────────────────────────────────────────────
+  const handleClaim = async () => {
+    setTxError(null);
+    try {
+      await claim();
+    } catch (e) {
+      setTxError(cleanTxError(e));
+    }
+  };
 
   return (
-    <div className="rounded-2xl border border-gray-200 bg-white p-6 space-y-5 sticky top-24">
-      <h2 className="text-lg font-bold text-gray-900">Investment Panel</h2>
+    <div className="lg:sticky lg:top-24">
+      <div className="overflow-hidden rounded-2xl border border-hairline bg-surface shadow-card">
+        {/* Header */}
+        <div className="border-b border-hairline bg-elevated/40 px-5 py-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-faint">
+                Price per token
+              </p>
+              <p className="tabular mt-1 font-display text-2xl font-semibold text-ink">
+                {offeringAddress
+                  ? formatUsd(terms.pricePerToken, payDecimals)
+                  : formatUsd(property.pricePerToken)}
+              </p>
+            </div>
+            {!offeringAddress ? (
+              // No offering deployed yet — "Closed" would imply one had opened and ended.
+              <Badge tone="neutral">No offering</Badge>
+            ) : isOpen ? (
+              <Badge tone="positive" dot pulse>
+                Open
+              </Badge>
+            ) : cancelled ? (
+              <Badge tone="negative">Cancelled</Badge>
+            ) : finalized ? (
+              <Badge tone="info">Finalised</Badge>
+            ) : (
+              <Badge tone="neutral">Closed</Badge>
+            )}
+          </div>
 
-      {/* Progress */}
-      {offeringAddress && (
-        <ProgressBar
-          committed={totalTokensCommitted}
-          total={property.totalSupply}
-        />
-      )}
-
-      {/* Price summary */}
-      <div className="text-sm text-gray-600 space-y-1">
-        <div className="flex justify-between">
-          <span>Price / token</span>
-          <span className="font-semibold text-gray-900">
-            {formatUsd(property.pricePerToken)}
-          </span>
+          {/* Funding progress — measured against the offering's hard cap, which is
+              what actually limits the raise. */}
+          {offeringAddress && terms.hardCap > 0n && (
+            <div className="mt-4">
+              <div className="mb-1.5 flex items-baseline justify-between text-xs">
+                <span className="text-muted">
+                  <span className="tabular font-medium text-ink">
+                    {formatTokens(totalTokensCommitted)}
+                  </span>{' '}
+                  of {formatTokens(terms.hardCap)} committed
+                </span>
+                <span className="tabular font-medium text-accent">{fundedPct.toFixed(1)}%</span>
+              </div>
+              <Progress value={fundedPct} />
+              {terms.softCap > 0n && (
+                <p className="mt-1.5 text-[11px] text-faint">
+                  {softCapMet
+                    ? `Soft cap of ${formatTokens(terms.softCap)} reached — the raise can be finalised.`
+                    : `${formatTokens(terms.softCap)} needed to clear the soft cap.`}
+                </p>
+              )}
+            </div>
+          )}
         </div>
-        {tokenAmount > 0n && (
-          <div className="flex justify-between text-indigo-700 font-semibold">
-            <span>Total cost</span>
-            <span>{formatUsd(totalCost)}</span>
+
+        {/* Body */}
+        <div className="space-y-4 px-5 py-5">
+          {!offeringAddress ? (
+            <p className="py-2 text-sm text-muted">
+              No offering contract has been deployed for this property yet.
+            </p>
+          ) : cancelled ? (
+            <div className="space-y-3">
+              <Alert tone="negative" title="Offering cancelled">
+                This raise was cancelled. Committed funds are refundable from the offering contract.
+              </Alert>
+              {myTokens > 0n && (
+                <Button variant="outline" fullWidth loading={isPending} onClick={() => void handleRefund()}>
+                  Claim refund
+                </Button>
+              )}
+            </div>
+          ) : canClaim ? (
+            <div className="space-y-3">
+              <Alert tone="positive" title="Your tokens are ready to claim">
+                The raise was finalised. Claiming mints{' '}
+                <span className="tabular font-semibold">{formatTokens(myTokens)}</span> tokens
+                directly to your wallet — until you do, the balance exists only as a claim on the
+                offering.
+              </Alert>
+              <Button fullWidth size="lg" loading={claiming} onClick={() => void handleClaim()}>
+                Claim {formatTokens(myTokens)} tokens
+              </Button>
+            </div>
+          ) : !isOpen ? (
+            <Alert tone="neutral" title={finalized ? 'Offering finalised' : 'Offering closed'}>
+              {finalized
+                ? hasClaimed
+                  ? 'You have claimed your allocation. Look for this asset on the secondary market to trade it.'
+                  : 'The raise completed. Look for this asset on the secondary market.'
+                : withinWindow
+                  ? 'This offering is not currently accepting new capital.'
+                  : 'This offering is outside its subscription window.'}
+            </Alert>
+          ) : !isConnected ? (
+            <div className="space-y-3">
+              <p className="text-sm text-muted">Connect a wallet to invest in this offering.</p>
+              <ConnectButton />
+            </div>
+          ) : !isVerified ? (
+            <div className="space-y-3">
+              <Alert tone="warn" title="Identity verification required">
+                Your wallet is not in the on-chain identity registry, so the offering will reject
+                your subscription. Verify to unlock investing.
+              </Alert>
+              <SelfVerifyButton onVerified={() => void refetchVerified()} />
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {/* Amount */}
+              <div>
+                <div className="mb-1.5 flex items-baseline justify-between">
+                  <label
+                    htmlFor="token-amount"
+                    className="text-[11px] font-semibold uppercase tracking-wider text-faint"
+                  >
+                    Tokens to buy
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setTokenInput(formatUnits(tokensAvailable, TOKEN_DECIMALS))
+                    }
+                    className="text-[11px] font-semibold text-accent transition-colors hover:text-accent-hover"
+                  >
+                    Max {formatTokens(tokensAvailable)}
+                  </button>
+                </div>
+                <input
+                  id="token-amount"
+                  type="number"
+                  min="0"
+                  step="any"
+                  inputMode="decimal"
+                  value={tokenInput}
+                  onChange={(e) => {
+                    setTokenInput(e.target.value);
+                    setTxError(null);
+                    setSuccessMsg(null);
+                  }}
+                  placeholder="0"
+                  className="tabular h-12 w-full rounded-xl border border-hairline bg-elevated px-3 font-display text-lg text-ink placeholder:text-faint transition-colors hover:border-edge focus:border-accent/60 focus:outline-none focus:ring-2 focus:ring-accent/25"
+                />
+              </div>
+
+              {/* Cost summary */}
+              <div className="space-y-2 rounded-xl border border-hairline bg-elevated/50 px-4 py-3">
+                <PanelRow label="Tokens" value={formatTokens(tokenAmount)} />
+                <PanelRow
+                  label="Price per token"
+                  value={formatUsd(terms.pricePerToken, payDecimals)}
+                />
+                <div className="rule-fade" />
+                <PanelRow
+                  label="Total cost"
+                  value={formatUsd(totalCost, payDecimals)}
+                  emphasis
+                />
+              </div>
+
+              {/* Two-step action */}
+              {needsApprove ? (
+                <div className="space-y-2">
+                  <Button fullWidth size="lg" loading={isPending} onClick={() => void handleApprove()}>
+                    Approve {formatUsd(totalCost, payDecimals)}
+                  </Button>
+                  <p className="text-center text-[11px] text-faint">
+                    Step 1 of 2 — allow the offering contract to pull your stablecoins
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <Button
+                    fullWidth
+                    size="lg"
+                    loading={isPending}
+                    disabled={tokenAmount <= 0n}
+                    onClick={() => void handleInvest()}
+                  >
+                    Invest {tokenAmount > 0n ? formatUsd(totalCost, payDecimals) : ''}
+                  </Button>
+                  {tokenAmount > 0n && (
+                    <p className="text-center text-[11px] text-faint">
+                      Step 2 of 2 — subscribe to the offering
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {txError && <Alert tone="negative">{txError}</Alert>}
+              {successMsg && <Alert tone="positive">{successMsg}</Alert>}
+            </div>
+          )}
+
+          {/* Claim/refund errors surface outside the invest branch too. */}
+          {!isOpen && txError && <Alert tone="negative">{txError}</Alert>}
+          {!isOpen && successMsg && <Alert tone="positive">{successMsg}</Alert>}
+        </div>
+
+        {/* My position */}
+        {account && myTokens > 0n && (
+          <div className="border-t border-hairline bg-elevated/30 px-5 py-4">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-faint">
+              Your position
+            </p>
+            <div className="mt-2.5 space-y-2">
+              <PanelRow label="Tokens committed" value={formatTokens(myTokens)} />
+              <PanelRow
+                label="Capital deployed"
+                value={formatUsd(costFor(myTokens, terms.pricePerToken), payDecimals)}
+              />
+              <PanelRow
+                label="Status"
+                value={hasClaimed ? 'Claimed' : finalized ? 'Claimable' : 'Committed'}
+              />
+              {lockupExpiry > 0n && (
+                <PanelRow label="Lockup expires" value={formatDate(lockupExpiry)} />
+              )}
+            </div>
+
+            {hasClaimed && !isZeroAddress(property.tokenAddress) && (
+              <div className="mt-3">
+                <AddToWalletButton
+                  tokenAddress={property.tokenAddress}
+                  symbol={tokenInfo.symbol}
+                  decimals={tokenInfo.decimals}
+                />
+                <p className="mt-1.5 text-[11px] leading-tight text-faint">
+                  Each property is its own token contract, so your wallet needs the address before
+                  it will show the balance.
+                </p>
+              </div>
+            )}
           </div>
         )}
       </div>
 
-      <hr className="border-gray-100" />
-
-      {/* State: no offering contract yet */}
-      {!offeringAddress && (
-        <p className="text-sm text-gray-400 text-center py-4">
-          No active offering for this property.
-        </p>
-      )}
-
-      {/* State: offering not open */}
-      {offeringAddress && property.status !== PropertyStatus.OfferingOpen && !cancelled && (
-        <p className="text-sm text-gray-500 text-center py-2">
-          Offering is not currently active.{' '}
-          <span className="font-medium">
-            Status: {finalized ? 'Finalized' : 'Closed'}
-          </span>
-        </p>
-      )}
-
-      {/* State: cancelled — show refund */}
-      {offeringAddress && cancelled && (
-        <div className="space-y-3">
-          <p className="text-sm text-red-600 font-medium">
-            This offering was cancelled.
-          </p>
-          {myTokens > 0n && (
-            <TxButton
-              label="Claim Refund"
-              loading={isPending}
-              onClick={handleRefund}
-              variant="outline"
-            />
-          )}
-        </div>
-      )}
-
-      {/* State: active offering */}
-      {offeringAddress &&
-        property.status === PropertyStatus.OfferingOpen &&
-        !cancelled && (
-          <>
-            {!account ? (
-              <p className="text-sm text-gray-400 text-center">
-                Connect your wallet to invest.
-              </p>
-            ) : !isVerified ? (
-              <KYCGatePlaceholder />
-            ) : (
-              <div className="space-y-3">
-                {/* Token input */}
-                <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1">
-                    Number of tokens
-                  </label>
-                  <input
-                    type="number"
-                    min="1"
-                    max={tokensAvailable.toString()}
-                    value={tokenInput}
-                    onChange={(e) => {
-                      setTokenInput(e.target.value);
-                      setTxError(null);
-                      setSuccessMsg(null);
-                    }}
-                    placeholder={`1 – ${tokensAvailable.toLocaleString()}`}
-                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
-                  <p className="text-xs text-gray-400 mt-1">
-                    Available: {tokensAvailable.toLocaleString()}
-                  </p>
-                </div>
-
-                {/* Two-step buttons */}
-                {needsApprove ? (
-                  <TxButton
-                    label="1. Approve USDC"
-                    loading={isPending}
-                    disabled={tokenAmount <= 0n}
-                    onClick={handleApprove}
-                    variant="outline"
-                  />
-                ) : (
-                  <TxButton
-                    label="Invest"
-                    loading={isPending}
-                    disabled={tokenAmount <= 0n}
-                    onClick={handleInvest}
-                  />
-                )}
-
-                {/* Error */}
-                {txError && (
-                  <p className="text-xs text-red-600 break-words">{txError}</p>
-                )}
-
-                {/* Success */}
-                {successMsg && (
-                  <div className="rounded-lg bg-green-50 border border-green-200 p-3 text-xs text-green-800">
-                    {successMsg}
-                  </div>
-                )}
-              </div>
-            )}
-          </>
-        )}
-
-      {/* My investment summary */}
-      {account && myTokens > 0n && (
-        <>
-          <hr className="border-gray-100" />
-          <div className="space-y-2 text-sm">
-            <p className="font-semibold text-gray-900">My Investment</p>
-            <div className="flex justify-between text-gray-600">
-              <span>Tokens committed</span>
-              <span className="font-medium">{myTokens.toLocaleString()}</span>
-            </div>
-            <div className="flex justify-between text-gray-600">
-              <span>Payment paid</span>
-              <span className="font-medium">
-                {formatUsd(myTokens * property.pricePerToken)}
-              </span>
-            </div>
-            <div className="flex justify-between text-gray-600">
-              <span>Lockup expiry</span>
-              <span className="font-medium">{formatDate(lockupExpiry)}</span>
-            </div>
-          </div>
-        </>
-      )}
+      {/* Risk note — small, but it belongs next to a buy button */}
+      <p className="text-pretty mt-3 px-1 text-[11px] leading-relaxed text-faint">
+        Tokenised property interests are illiquid and may lose value. Transfers are restricted to
+        verified wallets and subject to an on-chain lockup.
+      </p>
     </div>
   );
 }

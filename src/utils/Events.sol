@@ -6,6 +6,10 @@ event PropertyRegistered(uint256 indexed propertyId, address indexed owner, stri
 event PropertyStatusUpdated(uint256 indexed propertyId, uint8 oldStatus, uint8 newStatus);
 event PropertyMetadataUpdated(uint256 indexed propertyId, string newURI);
 event PropertyLegalDetailsUpdated(uint256 indexed propertyId, address spvAddress, bytes32 legalHash, uint16 jurisdiction);
+/// @notice A Draft listing's supply / price per token were revised before submission.
+event PropertyOfferingTermsUpdated(uint256 indexed propertyId, uint256 totalSupply, uint256 pricePerToken);
+/// @notice An admin sent a submitted listing back to Draft with feedback for the owner.
+event PropertySubmissionRejected(uint256 indexed propertyId, string reason);
 
 // ─── PropertyToken ──────────────────────────────────────────────────────────
 event PropertyTokensMinted(uint256 indexed propertyId, address indexed to, uint256 amount);
@@ -68,3 +72,4 @@ event InvestmentMade(uint256 indexed propertyId, address indexed investor, uint2
 event OfferingFinalized(uint256 indexed propertyId, address indexed offeringContract, uint256 totalRaised);
 event OfferingCancelled(uint256 indexed propertyId, address indexed offeringContract);
 event InvestorRefunded(uint256 indexed propertyId, address indexed investor, uint256 refundAmount);
+event OfferingTokensClaimed(uint256 indexed propertyId, address indexed investor, uint256 tokenAmount, uint256 lockupExpiry);

@@ -13,5 +13,8 @@ docs/
 # Local runtime data (postgres/ipfs docker volumes)
 data/
 
-# Dotenv file
+# Dotenv files — match every variant (.env.local, .env.bak-*, .env.production …)
+# so a stray copy of a file holding PRIVATE_KEY can never be committed.
 .env
+.env.*
+!.env.example

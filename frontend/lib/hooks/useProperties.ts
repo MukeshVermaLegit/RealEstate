@@ -44,9 +44,11 @@ export function useProperties(count: number) {
     [count, addresses.propertyRegistry],
   );
 
+  const enabled = count > 0;
+
   const result = useReadContracts({
     contracts,
-    query: { enabled: count > 0 },
+    query: { enabled },
   });
 
   const properties = useMemo<Property[]>(
@@ -57,7 +59,9 @@ export function useProperties(count: number) {
     [result.data],
   );
 
-  return { ...result, properties };
+  // react-query reports `pending` for a DISABLED query, so an empty registry
+  // would otherwise leave every consumer stuck on a skeleton forever.
+  return { ...result, properties, isPending: enabled && result.isPending };
 }
 
 // ─── Price oracle ─────────────────────────────────────────────────────────────

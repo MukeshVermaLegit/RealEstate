@@ -45,7 +45,14 @@ export type IPFSMetadata = {
   name:        string;
   description: string;
   location:    string;
+  /** Gateway URL of the PRIMARY image, ready for <img src>. */
   imageUrl:    string;
+  /** The original `ipfs://…` value of the primary image, needed to re-pin on an edit. */
+  imageUri:    string;
+  /** Every gallery image as a gateway URL, primary first. */
+  imageUrls:   string[];
+  /** Every gallery image as its original `ipfs://…` value, primary first. */
+  imageUris:   string[];
   documents:   string[];
 };
 

@@ -17,7 +17,9 @@ import {
     PropertyRegistered,
     PropertyMetadataUpdated,
     PropertyStatusUpdated,
-    PropertyLegalDetailsUpdated
+    PropertyLegalDetailsUpdated,
+    PropertySubmissionRejected,
+    PropertyOfferingTermsUpdated
 } from "../../src/utils/Events.sol";
 
 contract PropertyRegistryTest is Test {
@@ -110,17 +112,34 @@ contract PropertyRegistryTest is Test {
         registry.registerProperty(URI, 0, PRICE, address(0), bytes32(0), 0);
     }
 
-    function test_revert_register_nonAdmin() public {
-        bytes32 role = registry.PROPERTY_ADMIN_ROLE();
+    /// Registration is permissionless: any wallet can create a Draft listing and owns it.
+    /// Admin approval is what gates a listing becoming investable, not registration itself.
+    function test_registerProperty_byAnyWallet() public {
         vm.prank(alice);
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                IAccessControl.AccessControlUnauthorizedAccount.selector,
-                alice,
-                role
-            )
-        );
-        registry.registerProperty(URI, SUPPLY, PRICE, address(0), bytes32(0), 0);
+        uint256 id = registry.registerProperty(URI, SUPPLY, PRICE, address(0), bytes32(0), 0);
+
+        Types.Property memory prop = registry.getProperty(id);
+        assertEq(prop.owner, alice);
+        assertEq(uint8(prop.status), uint8(Types.PropertyStatus.Draft));
+        assertFalse(registry.hasRole(registry.PROPERTY_ADMIN_ROLE(), alice));
+    }
+
+    function test_registerProperty_draftIsInert() public {
+        vm.prank(alice);
+        uint256 id = registry.registerProperty(URI, SUPPLY, PRICE, address(0), bytes32(0), 0);
+
+        // A self-registered Draft carries no token and no offering contract, so it cannot
+        // take investor money before an admin has approved and opened it.
+        Types.Property memory prop = registry.getProperty(id);
+        assertEq(prop.tokenAddress, address(0));
+        assertEq(prop.offeringContract, address(0));
+
+        // And its owner cannot walk it past review on their own.
+        vm.prank(alice);
+        registry.submitForReview(id);
+        vm.prank(alice);
+        vm.expectRevert();
+        registry.approveProperty(id);
     }
 
     // ─── updateMetadata ──────────────────────────────────────────────────────
@@ -134,18 +153,64 @@ contract PropertyRegistryTest is Test {
     }
 
     function test_updateMetadata_byPropertyOwner() public {
-        // Grant alice the role, register as alice
-        bytes32 role = registry.PROPERTY_ADMIN_ROLE();
-        vm.prank(admin);
-        registry.grantRole(role, alice);
-
         vm.prank(alice);
         uint256 id = registry.registerProperty(URI, SUPPLY, PRICE, address(0), bytes32(0), 0);
 
-        // alice owns the property, can update without admin role after it's registered
+        // alice owns the property and it is still a Draft, so she can revise it freely
         vm.prank(alice);
         registry.updateMetadata(id, "ipfs://QmUpdated");
         assertEq(registry.getProperty(id).metadataURI, "ipfs://QmUpdated");
+    }
+
+    /// Once a listing leaves Draft it is what admins vet and investors buy against, so the
+    /// owner loses edit rights — otherwise a seller could swap the legal pack after a sale.
+    function test_revert_updateMetadata_ownerAfterSubmit() public {
+        vm.startPrank(alice);
+        uint256 id = registry.registerProperty(URI, SUPPLY, PRICE, address(0), bytes32(0), 0);
+        registry.submitForReview(id);
+
+        vm.expectRevert(abi.encodeWithSelector(PropertyRegistry__InvalidStatus.selector, id));
+        registry.updateMetadata(id, "ipfs://QmSwapped");
+        vm.stopPrank();
+
+        assertEq(registry.getProperty(id).metadataURI, URI);
+    }
+
+    function test_revert_updateLegalDetails_ownerAfterSubmit() public {
+        vm.startPrank(alice);
+        uint256 id = registry.registerProperty(URI, SUPPLY, PRICE, address(0), bytes32(0), 0);
+        registry.submitForReview(id);
+
+        vm.expectRevert(abi.encodeWithSelector(PropertyRegistry__InvalidStatus.selector, id));
+        registry.updateLegalDetails(id, makeAddr("otherSpv"), keccak256("swapped"), 250);
+        vm.stopPrank();
+    }
+
+    /// Admins keep edit rights at every status — they are the ones fixing a bad record.
+    function test_updateMetadata_byAdmin_afterSubmit() public {
+        vm.startPrank(alice);
+        uint256 id = registry.registerProperty(URI, SUPPLY, PRICE, address(0), bytes32(0), 0);
+        registry.submitForReview(id);
+        vm.stopPrank();
+
+        vm.prank(admin);
+        registry.updateMetadata(id, "ipfs://QmCorrected");
+        assertEq(registry.getProperty(id).metadataURI, "ipfs://QmCorrected");
+    }
+
+    function test_updateMetadata_ownerAfterRejectionBackToDraft() public {
+        vm.startPrank(alice);
+        uint256 id = registry.registerProperty(URI, SUPPLY, PRICE, address(0), bytes32(0), 0);
+        registry.submitForReview(id);
+        vm.stopPrank();
+
+        vm.prank(admin);
+        registry.rejectSubmission(id, "SPV address missing");
+
+        // Back in Draft, edit rights return to the owner
+        vm.prank(alice);
+        registry.updateMetadata(id, "ipfs://QmFixed");
+        assertEq(registry.getProperty(id).metadataURI, "ipfs://QmFixed");
     }
 
     function test_updateMetadata_emitsEvent() public {
@@ -174,6 +239,60 @@ contract PropertyRegistryTest is Test {
         vm.prank(alice);
         vm.expectRevert(abi.encodeWithSelector(PropertyRegistry__NotPropertyOwner.selector, id));
         registry.updateMetadata(id, "ipfs://QmHack");
+    }
+
+    // ─── updateOfferingTerms ─────────────────────────────────────────────────
+
+    function test_updateOfferingTerms_byOwnerWhileDraft() public {
+        vm.startPrank(alice);
+        uint256 id = registry.registerProperty(URI, SUPPLY, PRICE, address(0), bytes32(0), 0);
+        registry.updateOfferingTerms(id, 2_000 ether, 250e18);
+        vm.stopPrank();
+
+        Types.Property memory prop = registry.getProperty(id);
+        assertEq(prop.totalSupply, 2_000 ether);
+        assertEq(prop.pricePerToken, 250e18);
+    }
+
+    function test_updateOfferingTerms_emitsEvent() public {
+        vm.startPrank(alice);
+        uint256 id = registry.registerProperty(URI, SUPPLY, PRICE, address(0), bytes32(0), 0);
+
+        vm.expectEmit(true, false, false, true, address(registry));
+        emit PropertyOfferingTermsUpdated(id, 2_000 ether, 250e18);
+        registry.updateOfferingTerms(id, 2_000 ether, 250e18);
+        vm.stopPrank();
+    }
+
+    /// Terms are what investors buy against, so they freeze the moment review starts.
+    function test_revert_updateOfferingTerms_afterSubmit() public {
+        vm.startPrank(alice);
+        uint256 id = registry.registerProperty(URI, SUPPLY, PRICE, address(0), bytes32(0), 0);
+        registry.submitForReview(id);
+
+        vm.expectRevert(abi.encodeWithSelector(PropertyRegistry__InvalidStatus.selector, id));
+        registry.updateOfferingTerms(id, 1 ether, 1e18);
+        vm.stopPrank();
+
+        assertEq(registry.getProperty(id).totalSupply, SUPPLY);
+    }
+
+    function test_revert_updateOfferingTerms_zeroSupply() public {
+        vm.startPrank(alice);
+        uint256 id = registry.registerProperty(URI, SUPPLY, PRICE, address(0), bytes32(0), 0);
+
+        vm.expectRevert(PropertyRegistry__InvalidSupply.selector);
+        registry.updateOfferingTerms(id, 0, PRICE);
+        vm.stopPrank();
+    }
+
+    function test_revert_updateOfferingTerms_nonOwner() public {
+        vm.prank(alice);
+        uint256 id = registry.registerProperty(URI, SUPPLY, PRICE, address(0), bytes32(0), 0);
+
+        vm.prank(makeAddr("mallory"));
+        vm.expectRevert(abi.encodeWithSelector(PropertyRegistry__NotPropertyOwner.selector, id));
+        registry.updateOfferingTerms(id, 1 ether, 1e18);
     }
 
     // ─── Lifecycle: submitForReview ──────────────────────────────────────────
@@ -212,6 +331,79 @@ contract PropertyRegistryTest is Test {
         registry.submitForReview(id);  // now UnderReview
         vm.expectRevert(abi.encodeWithSelector(PropertyRegistry__InvalidStatus.selector, id));
         registry.submitForReview(id);  // cannot re-submit
+        vm.stopPrank();
+    }
+
+    // ─── Lifecycle: approveProperty ──────────────────────────────────────────
+
+    // ─── Lifecycle: rejectSubmission ─────────────────────────────────────────
+
+    function test_rejectSubmission_returnsToDraft() public {
+        vm.startPrank(alice);
+        uint256 id = registry.registerProperty(URI, SUPPLY, PRICE, address(0), bytes32(0), 0);
+        registry.submitForReview(id);
+        vm.stopPrank();
+
+        vm.prank(admin);
+        registry.rejectSubmission(id, "Deed scan is illegible");
+        assertEq(uint8(registry.getProperty(id).status), uint8(Types.PropertyStatus.Draft));
+    }
+
+    function test_rejectSubmission_emitsReason() public {
+        vm.startPrank(alice);
+        uint256 id = registry.registerProperty(URI, SUPPLY, PRICE, address(0), bytes32(0), 0);
+        registry.submitForReview(id);
+        vm.stopPrank();
+
+        vm.prank(admin);
+        vm.expectEmit(true, false, false, true, address(registry));
+        emit PropertySubmissionRejected(id, "Deed scan is illegible");
+        registry.rejectSubmission(id, "Deed scan is illegible");
+    }
+
+    function test_rejectSubmission_canResubmit() public {
+        vm.startPrank(alice);
+        uint256 id = registry.registerProperty(URI, SUPPLY, PRICE, address(0), bytes32(0), 0);
+        registry.submitForReview(id);
+        vm.stopPrank();
+
+        vm.prank(admin);
+        registry.rejectSubmission(id, "Add the SPV address");
+
+        vm.startPrank(alice);
+        registry.updateLegalDetails(id, makeAddr("spv"), keccak256("pack"), 840);
+        registry.submitForReview(id);
+        vm.stopPrank();
+        assertEq(uint8(registry.getProperty(id).status), uint8(Types.PropertyStatus.UnderReview));
+
+        vm.prank(admin);
+        registry.approveProperty(id);
+        assertEq(uint8(registry.getProperty(id).status), uint8(Types.PropertyStatus.Approved));
+    }
+
+    function test_revert_rejectSubmission_wrongStatus() public {
+        vm.prank(alice);
+        uint256 id = registry.registerProperty(URI, SUPPLY, PRICE, address(0), bytes32(0), 0);
+
+        // Still a Draft — nothing has been submitted
+        vm.prank(admin);
+        vm.expectRevert(abi.encodeWithSelector(PropertyRegistry__InvalidStatus.selector, id));
+        registry.rejectSubmission(id, "too early");
+    }
+
+    function test_revert_rejectSubmission_nonAdmin() public {
+        vm.startPrank(alice);
+        uint256 id = registry.registerProperty(URI, SUPPLY, PRICE, address(0), bytes32(0), 0);
+        registry.submitForReview(id);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IAccessControl.AccessControlUnauthorizedAccount.selector,
+                alice,
+                registry.PROPERTY_ADMIN_ROLE()
+            )
+        );
+        registry.rejectSubmission(id, "self-approval attempt");
         vm.stopPrank();
     }
 
@@ -416,6 +608,29 @@ contract PropertyRegistryTest is Test {
         assertEq(uint8(registry.getProperty(id).status), uint8(Types.PropertyStatus.Trading));
 
         vm.stopPrank();
+    }
+
+    /// End-to-end for the self-serve path: an ordinary wallet lists, an admin reviews.
+    function test_selfServeLifecycle() public {
+        address fakeOffering = makeAddr("offering");
+
+        vm.startPrank(alice);
+        uint256 id = registry.registerProperty(URI, SUPPLY, PRICE, makeAddr("spv"), keccak256("pack"), 840);
+        registry.updateMetadata(id, "ipfs://QmRevised");
+        registry.submitForReview(id);
+        vm.stopPrank();
+
+        vm.startPrank(admin);
+        registry.approveProperty(id);
+        registry.openOffering(id, fakeOffering);
+        registry.closeOffering(id);
+        registry.openTrading(id);
+        vm.stopPrank();
+
+        Types.Property memory prop = registry.getProperty(id);
+        assertEq(uint8(prop.status), uint8(Types.PropertyStatus.Trading));
+        assertEq(prop.owner, alice, "owner survives the whole lifecycle");
+        assertEq(prop.metadataURI, "ipfs://QmRevised");
     }
 
     // ─── getProperty ─────────────────────────────────────────────────────────

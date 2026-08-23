@@ -292,5 +292,130 @@ contract PropertyTokenTest is Test {
         token.transfer(bob, 10 ether);
         assertEq(token.balanceOf(bob), 10 ether);
     }
-}
 
+    // ─── Auto-delegation (rent-claim prerequisite) ───────────────────────────
+
+    /// @dev The whole reason auto-delegation exists: RentDistributor caps each claim at
+    ///      `getPastVotes * totalRent / getPastTotalSupply`. ERC20Votes only writes vote
+    ///      checkpoints for accounts that have delegated, so without this every ordinary
+    ///      holder read 0 and every rent claim reverted.
+    function test_autoDelegate_onMint() public {
+        vm.prank(admin);
+        token.mint(alice, 100 ether);
+
+        assertEq(token.delegates(alice), alice);
+        assertEq(token.getVotes(alice), 100 ether);
+    }
+
+    function test_autoDelegate_onFirstReceipt() public {
+        vm.startPrank(admin);
+        kyc.verify(bob, 840, 2, 0);
+        token.mint(alice, 100 ether);
+        vm.stopPrank();
+
+        assertEq(token.delegates(bob), address(0));
+
+        vm.prank(alice);
+        token.transfer(bob, 40 ether);
+
+        assertEq(token.delegates(bob), bob);
+        assertEq(token.getVotes(bob),   40 ether);
+        assertEq(token.getVotes(alice), 60 ether);
+    }
+
+    /// @dev The invariant RentDistributor's pro-rata cap depends on: with every holder
+    ///      self-delegated, the vote checkpoints sum to total supply at any past block.
+    function test_autoDelegate_votesSumToTotalSupply() public {
+        vm.startPrank(admin);
+        kyc.verify(bob, 840, 2, 0);
+        token.mint(alice, 600 ether);
+        token.mint(bob,   400 ether);
+        vm.stopPrank();
+
+        vm.roll(block.number + 1);
+        uint256 snap = block.number - 1;
+
+        assertEq(token.getPastTotalSupply(snap), 1_000 ether);
+        assertEq(
+            token.getPastVotes(alice, snap) + token.getPastVotes(bob, snap),
+            token.getPastTotalSupply(snap)
+        );
+    }
+
+    /// @dev An explicit delegation must not be silently overwritten on later receipts.
+    function test_autoDelegate_doesNotOverrideExplicitChoice() public {
+        vm.startPrank(admin);
+        kyc.verify(bob, 840, 2, 0);
+        token.mint(alice, 100 ether);
+        vm.stopPrank();
+
+        vm.prank(alice);
+        token.delegate(bob); // alice deliberately delegates away
+
+        vm.prank(admin);
+        token.mint(alice, 50 ether);
+
+        assertEq(token.delegates(alice), bob);
+        assertEq(token.getVotes(alice), 0);
+        assertEq(token.getVotes(bob),   150 ether);
+    }
+
+    function test_autoDelegate_survivesBalanceGoingToZero() public {
+        vm.startPrank(admin);
+        kyc.verify(bob, 840, 2, 0);
+        token.mint(alice, 100 ether);
+        vm.stopPrank();
+
+        vm.prank(alice);
+        token.transfer(bob, 100 ether);
+
+        // Delegation persists so a re-entry does not need a second write.
+        assertEq(token.delegates(alice), alice);
+        assertEq(token.getVotes(alice), 0);
+    }
+
+    // ─── canTransfer parity ──────────────────────────────────────────────────
+
+    /// @dev canTransfer() is the frontend's pre-flight check; it previously omitted the
+    ///      lockup and compliance checks that _update actually enforces, so it could
+    ///      report success for a transfer that was guaranteed to revert.
+    function test_canTransfer_reportsLockup() public {
+        vm.startPrank(admin);
+        kyc.verify(bob, 840, 2, 0);
+        token.mint(alice, 100 ether);
+        token.setLockupExpiry(alice, block.timestamp + 30 days);
+        vm.stopPrank();
+
+        (bool ok, string memory reason) = token.canTransfer(alice, bob, 1 ether);
+        assertFalse(ok);
+        assertEq(reason, "sender tokens locked");
+
+        // And the guard agrees.
+        vm.prank(alice);
+        vm.expectRevert();
+        token.transfer(bob, 1 ether);
+    }
+
+    function test_canTransfer_okWhenLockupExpired() public {
+        vm.startPrank(admin);
+        kyc.verify(bob, 840, 2, 0);
+        token.mint(alice, 100 ether);
+        token.setLockupExpiry(alice, block.timestamp + 30 days);
+        vm.stopPrank();
+
+        vm.warp(block.timestamp + 31 days);
+
+        (bool ok, string memory reason) = token.canTransfer(alice, bob, 1 ether);
+        assertTrue(ok);
+        assertEq(reason, "");
+    }
+
+    function test_canTransfer_rejectsZeroAddress() public {
+        vm.prank(admin);
+        token.mint(alice, 100 ether);
+
+        (bool ok, string memory reason) = token.canTransfer(alice, address(0), 1 ether);
+        assertFalse(ok);
+        assertEq(reason, "zero address");
+    }
+}

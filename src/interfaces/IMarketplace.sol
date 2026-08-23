@@ -9,7 +9,9 @@ interface IMarketplace {
     /// @notice Create a new sell listing
     /// @param propertyId  The property whose tokens are being sold
     /// @param tokenAmount Number of fractional tokens to list
-    /// @param pricePerToken Asking price per token in payment token units
+    /// @param pricePerToken Asking price in payment-token units per ONE WHOLE property
+    ///                      token (1e18 token wei). Same unit as PropertyOffering.
+    ///                      e.g. USDC at $50.00/token → 50_000_000
     /// @param expiresAt   Unix timestamp after which the listing expires (0 = no expiry)
     /// @return listingId The ID of the new listing
     function createListing(
@@ -21,7 +23,8 @@ interface IMarketplace {
 
     /// @notice Buy tokens from an active listing
     /// @param listingId The listing to purchase from
-    /// @param amount    Number of tokens to buy (≤ listing.tokenAmount)
+    /// @param amount    Token wei to buy (≤ listing.tokenAmount). Cost is
+    ///                  `amount * pricePerToken / 1e18`, rounded up.
     function buyListing(uint256 listingId, uint256 amount) external;
 
     /// @notice Cancel an active listing (seller only)

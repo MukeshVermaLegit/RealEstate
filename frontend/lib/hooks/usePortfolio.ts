@@ -9,10 +9,12 @@ export type Holding = {
   propertyId:    bigint;
   tokenAddress:  `0x${string}`;
   balance:       bigint;
+  /** Token wei, so it is directly comparable with `balance`. */
   totalSupply:   bigint;
   pricePerToken: bigint;
   lockupExpiry:  bigint;
   metadataURI:   string;
+  symbol:        string;
 };
 
 export function useHoldings(address: `0x${string}` | undefined): {
@@ -29,7 +31,8 @@ export function useHoldings(address: `0x${string}` | undefined): {
     [properties],
   );
 
-  // Two calls per property: balanceOf + lockupExpiry
+  // Three calls per property: balanceOf + lockupExpiry + symbol
+  const CALLS_PER_PROPERTY = 3;
   const contracts = useMemo(() => {
     if (!address || validProps.length === 0) return [];
     return validProps.flatMap((p) => [
@@ -45,20 +48,29 @@ export function useHoldings(address: `0x${string}` | undefined): {
         functionName: 'lockupExpiry' as const,
         args:         [address] as const,
       },
+      {
+        address:      p.tokenAddress,
+        abi:          PropertyTokenABI,
+        functionName: 'symbol' as const,
+      },
     ]);
   }, [validProps, address]);
 
+  const tokenEnabled = contracts.length > 0;
+
   const { data: tokenData, isPending: tokenPending } = useReadContracts({
     contracts,
-    query: { enabled: contracts.length > 0 },
+    query: { enabled: tokenEnabled },
   });
 
   const holdings = useMemo<Holding[]>(() => {
     if (!tokenData || validProps.length === 0) return [];
 
     return validProps.reduce<Holding[]>((acc, prop, i) => {
-      const balance      = (tokenData[i * 2]?.result     as bigint | undefined) ?? 0n;
-      const lockupExpiry = (tokenData[i * 2 + 1]?.result as bigint | undefined) ?? 0n;
+      const base         = i * CALLS_PER_PROPERTY;
+      const balance      = (tokenData[base]?.result     as bigint | undefined) ?? 0n;
+      const lockupExpiry = (tokenData[base + 1]?.result as bigint | undefined) ?? 0n;
+      const symbol       = (tokenData[base + 2]?.result as string | undefined) ?? '';
 
       if (balance === 0n) return acc; // Filter out zero-balance properties
 
@@ -66,10 +78,13 @@ export function useHoldings(address: `0x${string}` | undefined): {
         propertyId:    prop.propertyId,
         tokenAddress:  prop.tokenAddress,
         balance,
-        totalSupply:   prop.totalSupply,
+        // The registry counts supply in WHOLE tokens while balances are wei, so
+        // scale here — otherwise every "% of supply" is out by a factor of 1e18.
+        totalSupply:   prop.totalSupply * 10n ** 18n,
         pricePerToken: prop.pricePerToken,
         lockupExpiry,
         metadataURI:   prop.metadataURI,
+        symbol,
       });
       return acc;
     }, []);
@@ -77,6 +92,8 @@ export function useHoldings(address: `0x${string}` | undefined): {
 
   return {
     holdings,
-    isLoading: countPending || propertiesPending || tokenPending,
+    // `tokenPending` is true while the query is disabled, which is the case for
+    // a wallet holding nothing — report settled instead of loading forever.
+    isLoading: countPending || propertiesPending || (tokenEnabled && tokenPending),
   };
 }

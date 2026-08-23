@@ -15,7 +15,11 @@ import {
     PropertyRegistry__NotPropertyOwner,
     PropertyRegistry__InvalidStatus
 } from "../utils/Errors.sol";
-import {PropertyLegalDetailsUpdated} from "../utils/Events.sol";
+import {
+    PropertyLegalDetailsUpdated,
+    PropertySubmissionRejected,
+    PropertyOfferingTermsUpdated
+} from "../utils/Events.sol";
 
 /// @title PropertyRegistry
 /// @notice Central registry for all tokenized real-estate properties with a structured
@@ -44,6 +48,10 @@ contract PropertyRegistry is IPropertyRegistry, Initializable, AccessControl, UU
     // ─── IPropertyRegistry ───────────────────────────────────────────────────
 
     /// @inheritdoc IPropertyRegistry
+    /// @dev Permissionless by design: anyone may create a Draft listing for a property they
+    ///      own. A Draft is inert — it holds no tokens, has no offering contract and cannot
+    ///      take investor money. PROPERTY_ADMIN_ROLE remains the gate on every transition
+    ///      that makes a listing investable (approveProperty → openOffering → openTrading).
     function registerProperty(
         string calldata metadataURI,
         uint256 totalSupply,
@@ -51,7 +59,7 @@ contract PropertyRegistry is IPropertyRegistry, Initializable, AccessControl, UU
         address spvAddress,
         bytes32 legalHash,
         uint16  jurisdiction
-    ) external onlyRole(PROPERTY_ADMIN_ROLE) returns (uint256 propertyId) {
+    ) external returns (uint256 propertyId) {
         if (bytes(metadataURI).length == 0) revert PropertyRegistry__InvalidMetadataURI();
         if (totalSupply == 0) revert PropertyRegistry__InvalidSupply();
 
@@ -81,9 +89,7 @@ contract PropertyRegistry is IPropertyRegistry, Initializable, AccessControl, UU
         string calldata newURI
     ) external {
         Types.Property storage prop = _getExistingProperty(propertyId);
-        if (prop.owner != msg.sender && !hasRole(PROPERTY_ADMIN_ROLE, msg.sender)) {
-            revert PropertyRegistry__NotPropertyOwner(propertyId);
-        }
+        _requireEditRights(prop, propertyId);
         if (bytes(newURI).length == 0) revert PropertyRegistry__InvalidMetadataURI();
 
         prop.metadataURI = newURI;
@@ -98,13 +104,26 @@ contract PropertyRegistry is IPropertyRegistry, Initializable, AccessControl, UU
         uint16  jurisdiction
     ) external {
         Types.Property storage prop = _getExistingProperty(propertyId);
-        if (prop.owner != msg.sender && !hasRole(PROPERTY_ADMIN_ROLE, msg.sender)) {
-            revert PropertyRegistry__NotPropertyOwner(propertyId);
-        }
+        _requireEditRights(prop, propertyId);
         prop.spvAddress   = spvAddress;
         prop.legalHash    = legalHash;
         prop.jurisdiction = jurisdiction;
         emit PropertyLegalDetailsUpdated(propertyId, spvAddress, legalHash, jurisdiction);
+    }
+
+    /// @inheritdoc IPropertyRegistry
+    function updateOfferingTerms(
+        uint256 propertyId,
+        uint256 totalSupply,
+        uint256 pricePerToken
+    ) external {
+        Types.Property storage prop = _getExistingProperty(propertyId);
+        _requireEditRights(prop, propertyId);
+        if (totalSupply == 0) revert PropertyRegistry__InvalidSupply();
+
+        prop.totalSupply   = totalSupply;
+        prop.pricePerToken = pricePerToken;
+        emit PropertyOfferingTermsUpdated(propertyId, totalSupply, pricePerToken);
     }
 
     // ─── Lifecycle transitions ────────────────────────────────────────────────
@@ -116,6 +135,18 @@ contract PropertyRegistry is IPropertyRegistry, Initializable, AccessControl, UU
         if (prop.status != Types.PropertyStatus.Draft) revert PropertyRegistry__InvalidStatus(propertyId);
         emit PropertyStatusUpdated(propertyId, uint8(prop.status), uint8(Types.PropertyStatus.UnderReview));
         prop.status = Types.PropertyStatus.UnderReview;
+    }
+
+    /// @inheritdoc IPropertyRegistry
+    function rejectSubmission(
+        uint256 propertyId,
+        string calldata reason
+    ) external onlyRole(PROPERTY_ADMIN_ROLE) {
+        Types.Property storage prop = _getExistingProperty(propertyId);
+        if (prop.status != Types.PropertyStatus.UnderReview) revert PropertyRegistry__InvalidStatus(propertyId);
+        emit PropertyStatusUpdated(propertyId, uint8(prop.status), uint8(Types.PropertyStatus.Draft));
+        emit PropertySubmissionRejected(propertyId, reason);
+        prop.status = Types.PropertyStatus.Draft;
     }
 
     /// @inheritdoc IPropertyRegistry
@@ -200,6 +231,15 @@ contract PropertyRegistry is IPropertyRegistry, Initializable, AccessControl, UU
     }
 
     // ─── Internal ────────────────────────────────────────────────────────────
+
+    /// @dev Admins may edit at any point in the lifecycle. A non-admin owner may only edit
+    ///      while the listing is still a Draft — once it is submitted for review the record is
+    ///      what admins vet and what investors buy against, so it must not move underneath them.
+    function _requireEditRights(Types.Property storage prop, uint256 propertyId) internal view {
+        if (hasRole(PROPERTY_ADMIN_ROLE, msg.sender)) return;
+        if (prop.owner != msg.sender) revert PropertyRegistry__NotPropertyOwner(propertyId);
+        if (prop.status != Types.PropertyStatus.Draft) revert PropertyRegistry__InvalidStatus(propertyId);
+    }
 
     function _getExistingProperty(
         uint256 propertyId

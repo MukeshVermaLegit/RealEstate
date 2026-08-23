@@ -38,6 +38,7 @@ error Marketplace__ZeroPrice();
 error Marketplace__ListingExpired(uint256 listingId);
 error Marketplace__FeeTooHigh(uint16 feeBps, uint16 maxFeeBps);
 error Marketplace__ZeroFeeCollector();
+error Marketplace__InsufficientListingAmount(uint256 listingId, uint256 requested, uint256 available);
 
 // ─── PropertyFactory ────────────────────────────────────────────────────────
 error PropertyFactory__PropertyAlreadyDeployed(uint256 propertyId);
@@ -54,6 +55,11 @@ error RentDistributor__ExceedsTotalRent(uint256 propertyId, uint256 periodId);
 error RentDistributor__ArrayLengthMismatch();
 error RentDistributor__InvalidSnapshotBlock(uint256 snapshotBlock);
 error RentDistributor__ExceedsEntitlement(uint256 propertyId, uint256 periodId, address claimant, uint256 claimed, uint256 maxEntitlement);
+error RentDistributor__NothingToReclaim(uint256 propertyId, uint256 periodId);
+error RentDistributor__ZeroMerkleRoot();
+error RentDistributor__NoTokenForProperty(uint256 propertyId);
+error RentDistributor__EmptySnapshot(uint256 snapshotBlock);
+error RentDistributor__PeriodReclaimed(uint256 propertyId, uint256 periodId);
 
 // ─── PriceOracle ────────────────────────────────────────────────────────────
 error PriceOracle__StalePrice(uint256 propertyId, uint256 lastUpdated);
@@ -66,6 +72,18 @@ error PropertyOffering__OfferingNotActive();
 error PropertyOffering__SoftCapNotReached();
 error PropertyOffering__AlreadyFinalized();
 error PropertyOffering__NotCancelled();
+error PropertyOffering__NotFinalized();
+error PropertyOffering__AlreadyCancelled();
+error PropertyOffering__NothingToClaim(address investor);
+error PropertyOffering__TokensAlreadyClaimed(address investor);
+error PropertyOffering__OfferingNotEnded();
+error PropertyOffering__SoftCapAlreadyReached();
+error PropertyOffering__ZeroAddress();
+error PropertyOffering__ZeroAmount();
+error PropertyOffering__InvalidPrice();
+error PropertyOffering__InvalidCaps(uint256 softCap, uint256 hardCap);
+error PropertyOffering__InvalidTimeWindow(uint256 startTime, uint256 endTime);
+error PropertyOffering__HardCapExceedsMaxSupply(uint256 hardCap, uint256 maxSupply);
 
 // ─── IdentityRegistry ────────────────────────────────────────────────────────
 error IdentityRegistry__IdentityAlreadyExists(address wallet);
