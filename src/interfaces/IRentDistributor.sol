@@ -15,24 +15,17 @@ interface IRentDistributor {
     ///                      When non-zero, must be strictly less than block.number, and claimable amounts
     ///                      are bounded on-chain by ERC20Votes.getPastVotes() at that block.
     /// @return periodId     The ID of the new rent period.
-    function depositRent(
-        uint256 propertyId,
-        uint256 amount,
-        bytes32 merkleRoot,
-        uint256 snapshotBlock
-    ) external returns (uint256 periodId);
+    function depositRent(uint256 propertyId, uint256 amount, bytes32 merkleRoot, uint256 snapshotBlock)
+        external
+        returns (uint256 periodId);
 
     /// @notice Investor claims their allocation for a single period via Merkle proof.
     /// @param propertyId       The property to claim rent for.
     /// @param periodId         The rent period to claim.
     /// @param claimableAmount  Amount allocated to msg.sender (must match the Merkle leaf).
     /// @param merkleProof      Sibling hashes proving inclusion in period.merkleRoot.
-    function claimRent(
-        uint256 propertyId,
-        uint256 periodId,
-        uint256 claimableAmount,
-        bytes32[] calldata merkleProof
-    ) external;
+    function claimRent(uint256 propertyId, uint256 periodId, uint256 claimableAmount, bytes32[] calldata merkleProof)
+        external;
 
     /// @notice Batch claim across multiple periods in a single transaction.
     /// @param propertyIds  Array of property IDs (must be same length as other arrays).

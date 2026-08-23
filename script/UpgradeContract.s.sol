@@ -24,20 +24,16 @@ import {UUPSUpgradeable} from "@openzeppelin/contracts/proxy/utils/UUPSUpgradeab
 ///           # Step 3: execute
 ///           forge script script/UpgradeContract.s.sol --sig "execute()" ...
 contract UpgradeContract is Script {
-
     /// @notice Schedule the upgrade proposal on the TimelockController.
     function schedule() external {
         address timelockAddress = vm.envAddress("TIMELOCK_ADDRESS");
-        address proxyAddress    = vm.envAddress("PROXY_ADDRESS");
-        address newImpl         = vm.envAddress("NEW_IMPL_ADDRESS");
+        address proxyAddress = vm.envAddress("PROXY_ADDRESS");
+        address newImpl = vm.envAddress("NEW_IMPL_ADDRESS");
 
         TimelockController timelock = TimelockController(payable(timelockAddress));
 
         // upgradeToAndCall(newImpl, "") — empty calldata means no post-upgrade init
-        bytes memory upgradeCalldata = abi.encodeCall(
-            UUPSUpgradeable.upgradeToAndCall,
-            (newImpl, "")
-        );
+        bytes memory upgradeCalldata = abi.encodeCall(UUPSUpgradeable.upgradeToAndCall, (newImpl, ""));
 
         uint256 minDelay = timelock.getMinDelay();
         bytes32 predecessor = bytes32(0);
@@ -46,8 +42,8 @@ contract UpgradeContract is Script {
         vm.startBroadcast();
 
         timelock.schedule(
-            proxyAddress,    // target
-            0,               // value
+            proxyAddress, // target
+            0, // value
             upgradeCalldata, // data
             predecessor,
             salt,
@@ -74,28 +70,19 @@ contract UpgradeContract is Script {
     ///         Set SALT env var to the salt used during schedule().
     function execute() external {
         address timelockAddress = vm.envAddress("TIMELOCK_ADDRESS");
-        address proxyAddress    = vm.envAddress("PROXY_ADDRESS");
-        address newImpl         = vm.envAddress("NEW_IMPL_ADDRESS");
-        bytes32 salt            = vm.envBytes32("UPGRADE_SALT");
+        address proxyAddress = vm.envAddress("PROXY_ADDRESS");
+        address newImpl = vm.envAddress("NEW_IMPL_ADDRESS");
+        bytes32 salt = vm.envBytes32("UPGRADE_SALT");
 
         TimelockController timelock = TimelockController(payable(timelockAddress));
 
-        bytes memory upgradeCalldata = abi.encodeCall(
-            UUPSUpgradeable.upgradeToAndCall,
-            (newImpl, "")
-        );
+        bytes memory upgradeCalldata = abi.encodeCall(UUPSUpgradeable.upgradeToAndCall, (newImpl, ""));
 
         bytes32 predecessor = bytes32(0);
 
         vm.startBroadcast();
 
-        timelock.execute(
-            proxyAddress,
-            0,
-            upgradeCalldata,
-            predecessor,
-            salt
-        );
+        timelock.execute(proxyAddress, 0, upgradeCalldata, predecessor, salt);
 
         vm.stopBroadcast();
 
@@ -107,16 +94,13 @@ contract UpgradeContract is Script {
     /// @notice Helper: compute the operation ID for a pending upgrade (read-only).
     function operationId() external view returns (bytes32 opId) {
         address timelockAddress = vm.envAddress("TIMELOCK_ADDRESS");
-        address proxyAddress    = vm.envAddress("PROXY_ADDRESS");
-        address newImpl         = vm.envAddress("NEW_IMPL_ADDRESS");
-        bytes32 salt            = vm.envBytes32("UPGRADE_SALT");
+        address proxyAddress = vm.envAddress("PROXY_ADDRESS");
+        address newImpl = vm.envAddress("NEW_IMPL_ADDRESS");
+        bytes32 salt = vm.envBytes32("UPGRADE_SALT");
 
         TimelockController timelock = TimelockController(payable(timelockAddress));
 
-        bytes memory upgradeCalldata = abi.encodeCall(
-            UUPSUpgradeable.upgradeToAndCall,
-            (newImpl, "")
-        );
+        bytes memory upgradeCalldata = abi.encodeCall(UUPSUpgradeable.upgradeToAndCall, (newImpl, ""));
 
         opId = timelock.hashOperation(proxyAddress, 0, upgradeCalldata, bytes32(0), salt);
 

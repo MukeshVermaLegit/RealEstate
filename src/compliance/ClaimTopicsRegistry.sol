@@ -4,10 +4,7 @@ pragma solidity ^0.8.24;
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {IClaimTopicsRegistry} from "../interfaces/IClaimTopicsRegistry.sol";
 import "../utils/Events.sol";
-import {
-    ClaimTopicsRegistry__TopicAlreadyExists,
-    ClaimTopicsRegistry__TopicNotFound
-} from "../utils/Errors.sol";
+import {ClaimTopicsRegistry__TopicAlreadyExists, ClaimTopicsRegistry__TopicNotFound} from "../utils/Errors.sol";
 
 /// @title ClaimTopicsRegistry
 /// @notice Stores the global set of required claim topics that investors must
@@ -22,8 +19,8 @@ import {
 contract ClaimTopicsRegistry is IClaimTopicsRegistry, AccessControl {
     bytes32 public constant TOPICS_OWNER_ROLE = keccak256("TOPICS_OWNER_ROLE");
 
-    uint256[]                   private _topics;
-    mapping(uint256 => bool)    private _topicExists;
+    uint256[] private _topics;
+    mapping(uint256 => bool) private _topicExists;
 
     constructor(address admin) {
         _grantRole(DEFAULT_ADMIN_ROLE, admin);

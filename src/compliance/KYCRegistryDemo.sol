@@ -39,15 +39,13 @@ contract KYCRegistryDemo is KYCRegistry {
         if (rec.frozen) revert KYCRegistry__AccountFrozen(msg.sender);
         if (rec.verified) return;
 
-        rec.verified     = true;
-        rec.countryCode  = DEMO_COUNTRY_CODE;
+        rec.verified = true;
+        rec.countryCode = DEMO_COUNTRY_CODE;
         rec.investorType = DEMO_INVESTOR_TYPE;
-        rec.verifiedAt   = uint48(block.timestamp);
-        rec.expiresAt    = 0;
+        rec.verifiedAt = uint48(block.timestamp);
+        rec.expiresAt = 0;
 
-        emit AccountVerified(
-            msg.sender, msg.sender, DEMO_COUNTRY_CODE, DEMO_INVESTOR_TYPE, 0, block.timestamp
-        );
+        emit AccountVerified(msg.sender, msg.sender, DEMO_COUNTRY_CODE, DEMO_INVESTOR_TYPE, 0, block.timestamp);
         emit SelfVerified(msg.sender);
     }
 

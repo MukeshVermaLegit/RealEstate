@@ -28,16 +28,15 @@ contract PropertyRegistryTest is Test {
     address internal admin = makeAddr("admin");
     address internal alice = makeAddr("alice");
 
-    string  internal constant URI    = "ipfs://QmTest";
+    string internal constant URI = "ipfs://QmTest";
     uint256 internal constant SUPPLY = 1_000 ether;
-    uint256 internal constant PRICE  = 100e18;
+    uint256 internal constant PRICE = 100e18;
 
     function setUp() public {
         PropertyRegistry impl = new PropertyRegistry();
-        registry = PropertyRegistry(address(new ERC1967Proxy(
-            address(impl),
-            abi.encodeCall(PropertyRegistry.initialize, (admin))
-        )));
+        registry = PropertyRegistry(
+            address(new ERC1967Proxy(address(impl), abi.encodeCall(PropertyRegistry.initialize, (admin))))
+        );
     }
 
     // ─── Upgrade test ────────────────────────────────────────────────────────
@@ -80,17 +79,17 @@ contract PropertyRegistryTest is Test {
         uint256 id = registry.registerProperty(URI, SUPPLY, PRICE, address(0), bytes32(0), 0);
 
         Types.Property memory prop = registry.getProperty(id);
-        assertEq(prop.propertyId,      id);
-        assertEq(prop.owner,           admin);
-        assertEq(prop.metadataURI,     URI);
-        assertEq(prop.totalSupply,     SUPPLY);
-        assertEq(prop.pricePerToken,   PRICE);
-        assertEq(prop.createdAt,       block.timestamp);
-        assertEq(uint8(prop.status),   uint8(Types.PropertyStatus.Draft));
+        assertEq(prop.propertyId, id);
+        assertEq(prop.owner, admin);
+        assertEq(prop.metadataURI, URI);
+        assertEq(prop.totalSupply, SUPPLY);
+        assertEq(prop.pricePerToken, PRICE);
+        assertEq(prop.createdAt, block.timestamp);
+        assertEq(uint8(prop.status), uint8(Types.PropertyStatus.Draft));
         assertEq(prop.offeringContract, address(0));
-        assertEq(prop.spvAddress,      address(0));
-        assertEq(prop.legalHash,       bytes32(0));
-        assertEq(prop.jurisdiction,    0);
+        assertEq(prop.spvAddress, address(0));
+        assertEq(prop.legalHash, bytes32(0));
+        assertEq(prop.jurisdiction, 0);
     }
 
     function test_registerProperty_emitsEvent() public {
@@ -301,7 +300,7 @@ contract PropertyRegistryTest is Test {
         vm.prank(admin);
         uint256 id = registry.registerProperty(URI, SUPPLY, PRICE, address(0), bytes32(0), 0);
 
-        vm.prank(admin);  // admin is the property owner
+        vm.prank(admin); // admin is the property owner
         registry.submitForReview(id);
         assertEq(uint8(registry.getProperty(id).status), uint8(Types.PropertyStatus.UnderReview));
     }
@@ -328,9 +327,9 @@ contract PropertyRegistryTest is Test {
     function test_revert_submitForReview_wrongStatus() public {
         vm.startPrank(admin);
         uint256 id = registry.registerProperty(URI, SUPPLY, PRICE, address(0), bytes32(0), 0);
-        registry.submitForReview(id);  // now UnderReview
+        registry.submitForReview(id); // now UnderReview
         vm.expectRevert(abi.encodeWithSelector(PropertyRegistry__InvalidStatus.selector, id));
-        registry.submitForReview(id);  // cannot re-submit
+        registry.submitForReview(id); // cannot re-submit
         vm.stopPrank();
     }
 
@@ -398,9 +397,7 @@ contract PropertyRegistryTest is Test {
 
         vm.expectRevert(
             abi.encodeWithSelector(
-                IAccessControl.AccessControlUnauthorizedAccount.selector,
-                alice,
-                registry.PROPERTY_ADMIN_ROLE()
+                IAccessControl.AccessControlUnauthorizedAccount.selector, alice, registry.PROPERTY_ADMIN_ROLE()
             )
         );
         registry.rejectSubmission(id, "self-approval attempt");
@@ -420,7 +417,7 @@ contract PropertyRegistryTest is Test {
 
     function test_revert_approveProperty_wrongStatus() public {
         vm.prank(admin);
-        uint256 id = registry.registerProperty(URI, SUPPLY, PRICE, address(0), bytes32(0), 0);  // Draft, not UnderReview
+        uint256 id = registry.registerProperty(URI, SUPPLY, PRICE, address(0), bytes32(0), 0); // Draft, not UnderReview
 
         vm.prank(admin);
         vm.expectRevert(abi.encodeWithSelector(PropertyRegistry__InvalidStatus.selector, id));
@@ -445,7 +442,7 @@ contract PropertyRegistryTest is Test {
 
     function test_revert_openOffering_wrongStatus() public {
         vm.prank(admin);
-        uint256 id = registry.registerProperty(URI, SUPPLY, PRICE, address(0), bytes32(0), 0);  // Draft
+        uint256 id = registry.registerProperty(URI, SUPPLY, PRICE, address(0), bytes32(0), 0); // Draft
 
         vm.prank(admin);
         vm.expectRevert(abi.encodeWithSelector(PropertyRegistry__InvalidStatus.selector, id));
@@ -527,7 +524,7 @@ contract PropertyRegistryTest is Test {
 
     function test_revert_pauseProperty_fromDraft() public {
         vm.prank(admin);
-        uint256 id = registry.registerProperty(URI, SUPPLY, PRICE, address(0), bytes32(0), 0);  // Draft
+        uint256 id = registry.registerProperty(URI, SUPPLY, PRICE, address(0), bytes32(0), 0); // Draft
 
         vm.prank(admin);
         vm.expectRevert(abi.encodeWithSelector(PropertyRegistry__InvalidStatus.selector, id));
@@ -654,16 +651,16 @@ contract PropertyRegistryTest is Test {
     // ─── updateLegalDetails ─────────────────────────────────────────────────────
 
     function test_registerProperty_withLegalDetails() public {
-        address spv       = makeAddr("spv");
+        address spv = makeAddr("spv");
         bytes32 legalHash = keccak256("operating-agreement-v1");
-        uint16  juris     = 840; // USA
+        uint16 juris = 840; // USA
 
         vm.prank(admin);
         uint256 id = registry.registerProperty(URI, SUPPLY, PRICE, spv, legalHash, juris);
 
         Types.Property memory prop = registry.getProperty(id);
-        assertEq(prop.spvAddress,   spv);
-        assertEq(prop.legalHash,    legalHash);
+        assertEq(prop.spvAddress, spv);
+        assertEq(prop.legalHash, legalHash);
         assertEq(prop.jurisdiction, juris);
     }
 
@@ -671,16 +668,16 @@ contract PropertyRegistryTest is Test {
         vm.prank(admin);
         uint256 id = registry.registerProperty(URI, SUPPLY, PRICE, address(0), bytes32(0), 0);
 
-        address newSpv  = makeAddr("spv");
+        address newSpv = makeAddr("spv");
         bytes32 newHash = keccak256("deed-v2");
-        uint16  newJur  = 276; // Germany
+        uint16 newJur = 276; // Germany
 
         vm.prank(admin);
         registry.updateLegalDetails(id, newSpv, newHash, newJur);
 
         Types.Property memory prop = registry.getProperty(id);
-        assertEq(prop.spvAddress,   newSpv);
-        assertEq(prop.legalHash,    newHash);
+        assertEq(prop.spvAddress, newSpv);
+        assertEq(prop.legalHash, newHash);
         assertEq(prop.jurisdiction, newJur);
     }
 
@@ -688,9 +685,9 @@ contract PropertyRegistryTest is Test {
         vm.prank(admin);
         uint256 id = registry.registerProperty(URI, SUPPLY, PRICE, address(0), bytes32(0), 0);
 
-        address newSpv  = makeAddr("spv");
+        address newSpv = makeAddr("spv");
         bytes32 newHash = keccak256("deed-v2");
-        uint16  newJur  = 276;
+        uint16 newJur = 276;
 
         vm.prank(admin);
         vm.expectEmit(true, false, false, true, address(registry));

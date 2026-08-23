@@ -11,20 +11,17 @@ import {PriceUpdated} from "../../src/utils/Events.sol";
 contract PriceOracleTest is Test {
     PriceOracle internal oracle;
 
-    address internal admin   = makeAddr("admin");
+    address internal admin = makeAddr("admin");
     address internal updater = makeAddr("updater");
-    address internal alice   = makeAddr("alice");
+    address internal alice = makeAddr("alice");
 
     uint256 internal constant PROPERTY_ID = 1;
-    uint256 internal constant PRICE       = 500e18; // $500 per token
+    uint256 internal constant PRICE = 500e18; // $500 per token
 
     function setUp() public {
         vm.startPrank(admin);
         PriceOracle impl = new PriceOracle();
-        oracle = PriceOracle(address(new ERC1967Proxy(
-            address(impl),
-            abi.encodeCall(PriceOracle.initialize, (admin))
-        )));
+        oracle = PriceOracle(address(new ERC1967Proxy(address(impl), abi.encodeCall(PriceOracle.initialize, (admin)))));
         oracle.grantRole(oracle.UPDATER_ROLE(), updater);
         vm.stopPrank();
     }
@@ -59,7 +56,7 @@ contract PriceOracleTest is Test {
         oracle.updatePrice(PROPERTY_ID, PRICE);
 
         (uint256 price, uint256 lastUpdated) = oracle.getPrice(PROPERTY_ID);
-        assertEq(price,       PRICE);
+        assertEq(price, PRICE);
         assertEq(lastUpdated, block.timestamp);
     }
 
@@ -96,13 +93,7 @@ contract PriceOracleTest is Test {
     function test_revert_updatePrice_notUpdater() public {
         bytes32 role = oracle.UPDATER_ROLE();
         vm.prank(alice);
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                IAccessControl.AccessControlUnauthorizedAccount.selector,
-                alice,
-                role
-            )
-        );
+        vm.expectRevert(abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, alice, role));
         oracle.updatePrice(PROPERTY_ID, PRICE);
     }
 
@@ -114,7 +105,7 @@ contract PriceOracleTest is Test {
 
         (uint256 price, uint256 ts) = oracle.getPrice(PROPERTY_ID);
         assertEq(price, PRICE);
-        assertEq(ts,    block.timestamp);
+        assertEq(ts, block.timestamp);
     }
 
     function test_revert_getPrice_stale() public {
@@ -125,7 +116,9 @@ contract PriceOracleTest is Test {
         vm.warp(block.timestamp + oracle.MAX_STALENESS() + 1);
 
         vm.expectRevert(
-            abi.encodeWithSelector(PriceOracle__StalePrice.selector, PROPERTY_ID, block.timestamp - oracle.MAX_STALENESS() - 1)
+            abi.encodeWithSelector(
+                PriceOracle__StalePrice.selector, PROPERTY_ID, block.timestamp - oracle.MAX_STALENESS() - 1
+            )
         );
         oracle.getPrice(PROPERTY_ID);
     }
@@ -163,7 +156,7 @@ contract PriceOracleTest is Test {
     function test_getPriceUnsafe_returnsZeroIfNeverSet() public view {
         (uint256 price, uint256 ts) = oracle.getPriceUnsafe(PROPERTY_ID);
         assertEq(price, 0);
-        assertEq(ts,    0);
+        assertEq(ts, 0);
     }
 
     // ─── Fuzz ────────────────────────────────────────────────────────────────

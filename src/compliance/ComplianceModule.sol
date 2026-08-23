@@ -6,10 +6,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IComplianceModule} from "../interfaces/IComplianceModule.sol";
 import {IIdentityRegistry} from "../interfaces/IIdentityRegistry.sol";
 import "../utils/Events.sol";
-import {
-    ComplianceModule__TokenNotRegistered,
-    ComplianceModule__TokenAlreadyRegistered
-} from "../utils/Errors.sol";
+import {ComplianceModule__TokenNotRegistered, ComplianceModule__TokenAlreadyRegistered} from "../utils/Errors.sol";
 
 /// @title ComplianceModule
 /// @notice Per-property-token compliance rule engine.
@@ -33,8 +30,8 @@ contract ComplianceModule is IComplianceModule, AccessControl {
     IIdentityRegistry private immutable _identityRegistry;
 
     mapping(address => ComplianceRules) private _rules;
-    mapping(address => bool)            private _tokenRegistered;
-    mapping(address => uint256)         private _holderCount;
+    mapping(address => bool) private _tokenRegistered;
+    mapping(address => uint256) private _holderCount;
     /// @dev tokenAddr => wallet => currently holds tokens
     mapping(address => mapping(address => bool)) private _isHolder;
 
@@ -48,10 +45,10 @@ contract ComplianceModule is IComplianceModule, AccessControl {
     // ─── Admin: rule management ──────────────────────────────────────────────
 
     /// @inheritdoc IComplianceModule
-    function addTokenCompliance(
-        address tokenAddr,
-        ComplianceRules calldata rules
-    ) external onlyRole(COMPLIANCE_ADMIN_ROLE) {
+    function addTokenCompliance(address tokenAddr, ComplianceRules calldata rules)
+        external
+        onlyRole(COMPLIANCE_ADMIN_ROLE)
+    {
         if (_tokenRegistered[tokenAddr]) revert ComplianceModule__TokenAlreadyRegistered(tokenAddr);
         _tokenRegistered[tokenAddr] = true;
         _rules[tokenAddr] = rules;
@@ -59,10 +56,10 @@ contract ComplianceModule is IComplianceModule, AccessControl {
     }
 
     /// @inheritdoc IComplianceModule
-    function updateTokenCompliance(
-        address tokenAddr,
-        ComplianceRules calldata rules
-    ) external onlyRole(COMPLIANCE_ADMIN_ROLE) {
+    function updateTokenCompliance(address tokenAddr, ComplianceRules calldata rules)
+        external
+        onlyRole(COMPLIANCE_ADMIN_ROLE)
+    {
         if (!_tokenRegistered[tokenAddr]) revert ComplianceModule__TokenNotRegistered(tokenAddr);
         _rules[tokenAddr] = rules;
         emit TokenComplianceUpdated(tokenAddr);
@@ -73,27 +70,27 @@ contract ComplianceModule is IComplianceModule, AccessControl {
     /// @inheritdoc IComplianceModule
     /// @dev Called by PropertyToken._update() for normal transfers only (from != 0 && to != 0).
     ///      Returns (true, "") immediately if the token has no registered rules.
-    function canTransfer(
-        address tokenAddr,
-        address from,
-        address to,
-        uint256 amount
-    ) external view returns (bool ok, string memory reason) {
+    function canTransfer(address tokenAddr, address from, address to, uint256 amount)
+        external
+        view
+        returns (bool ok, string memory reason)
+    {
         if (!_tokenRegistered[tokenAddr]) return (true, "");
 
         ComplianceRules storage rules = _rules[tokenAddr];
 
         // ── Country checks (requires IdentityRegistry) ──────────────────────
         if (address(_identityRegistry) != address(0)) {
-            uint16 toCountry   = _identityRegistry.countryCode(to);
+            uint16 toCountry = _identityRegistry.countryCode(to);
             uint16 fromCountry = (from != address(0)) ? _identityRegistry.countryCode(from) : 0;
 
             uint256 blockedLen = rules.blockedCountries.length;
             if (blockedLen > 0) {
                 for (uint256 i = 0; i < blockedLen; ++i) {
-                    if (rules.blockedCountries[i] == toCountry)   return (false, "recipient country blocked");
-                    if (from != address(0) && rules.blockedCountries[i] == fromCountry)
+                    if (rules.blockedCountries[i] == toCountry) return (false, "recipient country blocked");
+                    if (from != address(0) && rules.blockedCountries[i] == fromCountry) {
                         return (false, "sender country blocked");
+                    }
                 }
             }
 
@@ -101,14 +98,20 @@ contract ComplianceModule is IComplianceModule, AccessControl {
             if (allowedLen > 0) {
                 bool toAllowed = false;
                 for (uint256 i = 0; i < allowedLen; ++i) {
-                    if (rules.allowedCountries[i] == toCountry) { toAllowed = true; break; }
+                    if (rules.allowedCountries[i] == toCountry) {
+                        toAllowed = true;
+                        break;
+                    }
                 }
                 if (!toAllowed) return (false, "recipient country not allowed");
 
                 if (from != address(0)) {
                     bool fromAllowed = false;
                     for (uint256 i = 0; i < allowedLen; ++i) {
-                        if (rules.allowedCountries[i] == fromCountry) { fromAllowed = true; break; }
+                        if (rules.allowedCountries[i] == fromCountry) {
+                            fromAllowed = true;
+                            break;
+                        }
                     }
                     if (!fromAllowed) return (false, "sender country not allowed");
                 }
@@ -127,12 +130,11 @@ contract ComplianceModule is IComplianceModule, AccessControl {
         if (rules.maxHolders > 0) {
             bool toIsNew = !_isHolder[tokenAddr][to];
             // from's balance BEFORE this transfer; if equal to amount they will exit
-            bool fromWillExit = from != address(0)
-                && _isHolder[tokenAddr][from]
-                && IERC20(tokenAddr).balanceOf(from) == amount;
+            bool fromWillExit =
+                from != address(0) && _isHolder[tokenAddr][from] && IERC20(tokenAddr).balanceOf(from) == amount;
 
             uint256 projected = _holderCount[tokenAddr];
-            if (toIsNew)      projected += 1;
+            if (toIsNew) projected += 1;
             if (fromWillExit) projected -= 1;
 
             if (projected > rules.maxHolders) return (false, "max holders exceeded");
@@ -152,7 +154,9 @@ contract ComplianceModule is IComplianceModule, AccessControl {
         address from,
         address to,
         uint256 /*amount*/
-    ) external {
+    )
+        external
+    {
         // Security: only the token may report its own transfers
         if (msg.sender != tokenAddr) return;
         if (!_tokenRegistered[tokenAddr]) return;

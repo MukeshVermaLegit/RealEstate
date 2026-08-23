@@ -30,7 +30,7 @@ import {
 ///         Contracts that gate access (PropertyToken, Marketplace) call
 ///         isVerified() — its signature is unchanged from v1.
 contract KYCRegistry is IKYCRegistry, Initializable, AccessControl, UUPSUpgradeable {
-    bytes32 public constant ADMIN_ROLE    = keccak256("ADMIN_ROLE");
+    bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
     bytes32 public constant VERIFIER_ROLE = keccak256("VERIFIER_ROLE");
 
     /// @dev address => full compliance record.
@@ -45,28 +45,26 @@ contract KYCRegistry is IKYCRegistry, Initializable, AccessControl, UUPSUpgradea
 
     function initialize(address admin) external initializer {
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
-        _grantRole(ADMIN_ROLE,         admin);
-        _grantRole(VERIFIER_ROLE,      admin);
+        _grantRole(ADMIN_ROLE, admin);
+        _grantRole(VERIFIER_ROLE, admin);
     }
 
     // ─── IKYCRegistry ────────────────────────────────────────────────────────
 
     /// @inheritdoc IKYCRegistry
-    function verify(
-        address account,
-        uint16  countryCode,
-        uint8   investorType,
-        uint48  expiresAt
-    ) external onlyRole(VERIFIER_ROLE) {
+    function verify(address account, uint16 countryCode, uint8 investorType, uint48 expiresAt)
+        external
+        onlyRole(VERIFIER_ROLE)
+    {
         Types.InvestorRecord storage rec = _investors[account];
-        if (rec.frozen)    revert KYCRegistry__AccountFrozen(account);
-        if (rec.verified)  revert KYCRegistry__AlreadyVerified(account);
+        if (rec.frozen) revert KYCRegistry__AccountFrozen(account);
+        if (rec.verified) revert KYCRegistry__AlreadyVerified(account);
 
-        rec.verified     = true;
-        rec.countryCode  = countryCode;
+        rec.verified = true;
+        rec.countryCode = countryCode;
         rec.investorType = investorType;
-        rec.verifiedAt   = uint48(block.timestamp);
-        rec.expiresAt    = expiresAt;
+        rec.verifiedAt = uint48(block.timestamp);
+        rec.expiresAt = expiresAt;
 
         emit AccountVerified(account, msg.sender, countryCode, investorType, expiresAt, block.timestamp);
     }
@@ -74,32 +72,28 @@ contract KYCRegistry is IKYCRegistry, Initializable, AccessControl, UUPSUpgradea
     /// @inheritdoc IKYCRegistry
     function batchVerify(
         address[] calldata accounts,
-        uint16[]  calldata countryCodes,
-        uint8[]   calldata investorTypes,
-        uint48[]  calldata expiresAts
+        uint16[] calldata countryCodes,
+        uint8[] calldata investorTypes,
+        uint48[] calldata expiresAts
     ) external onlyRole(VERIFIER_ROLE) {
         uint256 len = accounts.length;
-        if (
-            countryCodes.length  != len ||
-            investorTypes.length != len ||
-            expiresAts.length    != len
-        ) revert KYCRegistry__BatchLengthMismatch();
+        if (countryCodes.length != len || investorTypes.length != len || expiresAts.length != len) {
+            revert KYCRegistry__BatchLengthMismatch();
+        }
 
         for (uint256 i = 0; i < len; ++i) {
             address account = accounts[i];
             Types.InvestorRecord storage rec = _investors[account];
-            if (rec.frozen)   revert KYCRegistry__AccountFrozen(account);
+            if (rec.frozen) revert KYCRegistry__AccountFrozen(account);
             if (rec.verified) revert KYCRegistry__AlreadyVerified(account);
 
-            rec.verified     = true;
-            rec.countryCode  = countryCodes[i];
+            rec.verified = true;
+            rec.countryCode = countryCodes[i];
             rec.investorType = investorTypes[i];
-            rec.verifiedAt   = uint48(block.timestamp);
-            rec.expiresAt    = expiresAts[i];
+            rec.verifiedAt = uint48(block.timestamp);
+            rec.expiresAt = expiresAts[i];
 
-            emit AccountVerified(
-                account, msg.sender, countryCodes[i], investorTypes[i], expiresAts[i], block.timestamp
-            );
+            emit AccountVerified(account, msg.sender, countryCodes[i], investorTypes[i], expiresAts[i], block.timestamp);
         }
     }
 
@@ -138,7 +132,7 @@ contract KYCRegistry is IKYCRegistry, Initializable, AccessControl, UUPSUpgradea
     function isVerified(address account) external view returns (bool) {
         Types.InvestorRecord storage rec = _investors[account];
         if (!rec.verified) return false;
-        if (rec.frozen)    return false;
+        if (rec.frozen) return false;
         if (rec.expiresAt != 0 && block.timestamp > rec.expiresAt) return false;
         return true;
     }

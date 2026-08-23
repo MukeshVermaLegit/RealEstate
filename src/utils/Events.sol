@@ -5,7 +5,9 @@ pragma solidity ^0.8.24;
 event PropertyRegistered(uint256 indexed propertyId, address indexed owner, string metadataURI, uint256 totalSupply);
 event PropertyStatusUpdated(uint256 indexed propertyId, uint8 oldStatus, uint8 newStatus);
 event PropertyMetadataUpdated(uint256 indexed propertyId, string newURI);
-event PropertyLegalDetailsUpdated(uint256 indexed propertyId, address spvAddress, bytes32 legalHash, uint16 jurisdiction);
+event PropertyLegalDetailsUpdated(
+    uint256 indexed propertyId, address spvAddress, bytes32 legalHash, uint16 jurisdiction
+);
 /// @notice A Draft listing's supply / price per token were revised before submission.
 event PropertyOfferingTermsUpdated(uint256 indexed propertyId, uint256 totalSupply, uint256 pricePerToken);
 /// @notice An admin sent a submitted listing back to Draft with feedback for the owner.
@@ -24,7 +26,7 @@ event AccountVerified(
     address indexed account,
     address indexed verifiedBy,
     uint16 countryCode,
-    uint8  investorType,
+    uint8 investorType,
     uint48 expiresAt,
     uint256 timestamp
 );
@@ -33,7 +35,14 @@ event AccountFrozen(address indexed account);
 event AccountUnfrozen(address indexed account);
 
 // ─── Marketplace ────────────────────────────────────────────────────────────
-event ListingCreated(uint256 indexed listingId, uint256 indexed propertyId, address indexed seller, uint256 amount, uint256 pricePerToken, uint48 expiresAt);
+event ListingCreated(
+    uint256 indexed listingId,
+    uint256 indexed propertyId,
+    address indexed seller,
+    uint256 amount,
+    uint256 pricePerToken,
+    uint48 expiresAt
+);
 event ListingPurchased(uint256 indexed listingId, address indexed buyer, uint256 amount, uint256 totalPaid);
 event ListingCancelled(uint256 indexed listingId, address indexed seller);
 event FeeUpdated(uint16 newFeeBps);
@@ -72,4 +81,6 @@ event InvestmentMade(uint256 indexed propertyId, address indexed investor, uint2
 event OfferingFinalized(uint256 indexed propertyId, address indexed offeringContract, uint256 totalRaised);
 event OfferingCancelled(uint256 indexed propertyId, address indexed offeringContract);
 event InvestorRefunded(uint256 indexed propertyId, address indexed investor, uint256 refundAmount);
-event OfferingTokensClaimed(uint256 indexed propertyId, address indexed investor, uint256 tokenAmount, uint256 lockupExpiry);
+event OfferingTokensClaimed(
+    uint256 indexed propertyId, address indexed investor, uint256 tokenAmount, uint256 lockupExpiry
+);

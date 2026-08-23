@@ -38,14 +38,16 @@ contract PropertyFactory is IPropertyFactory, Initializable, AccessControl, UUPS
         address kycRegistryAddr,
         address complianceModuleAddr
     ) external override onlyRole(FACTORY_ROLE) returns (address tokenAddress) {
-        if (_tokens[propertyId] != address(0)) revert PropertyFactory__PropertyAlreadyDeployed(propertyId);
+        if (_tokens[propertyId] != address(0)) {
+            revert PropertyFactory__PropertyAlreadyDeployed(propertyId);
+        }
 
         PropertyToken token = new PropertyToken(
             name,
             symbol,
             propertyId,
             maxSupply,
-            msg.sender,   // deployer (FACTORY_ROLE holder) becomes admin of the token
+            msg.sender, // deployer (FACTORY_ROLE holder) becomes admin of the token
             kycRegistryAddr,
             complianceModuleAddr
         );

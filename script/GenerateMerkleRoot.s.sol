@@ -37,7 +37,7 @@ contract GenerateMerkleRoot is Script {
 
     function run() external view {
         string memory filePath = vm.envString("ALLOCATIONS_FILE");
-        string memory raw      = vm.readFile(filePath);
+        string memory raw = vm.readFile(filePath);
 
         // Parse JSON array — expects keys "investor" and "amount" per element.
         // vm.parseJson returns ABI-encoded bytes; we decode the full array at once.
@@ -83,19 +83,19 @@ contract GenerateMerkleRoot is Script {
     ///      tree[0] = leaf layer; tree[tree.length-1] = [root].
     ///      Odd-length layers duplicate the last node before pairing.
     function _buildTree(bytes32[] memory leaves) internal pure returns (bytes32[][] memory tree) {
-        uint256 n      = leaves.length;
+        uint256 n = leaves.length;
         uint256 levels = _ceilLog2(n) + 1;
-        tree           = new bytes32[][](levels);
-        tree[0]        = leaves;
+        tree = new bytes32[][](levels);
+        tree[0] = leaves;
 
         for (uint256 lvl = 1; lvl < levels; ++lvl) {
-            bytes32[] memory prev   = tree[lvl - 1];
-            uint256          pLen   = prev.length;
-            uint256          newLen = (pLen + 1) / 2;
-            bytes32[]  memory cur   = new bytes32[](newLen);
+            bytes32[] memory prev = tree[lvl - 1];
+            uint256 pLen = prev.length;
+            uint256 newLen = (pLen + 1) / 2;
+            bytes32[] memory cur = new bytes32[](newLen);
 
             for (uint256 i = 0; i < newLen; ++i) {
-                bytes32 left  = prev[2 * i];
+                bytes32 left = prev[2 * i];
                 bytes32 right = (2 * i + 1 < pLen) ? prev[2 * i + 1] : left;
                 cur[i] = _commutativeKeccak256(left, right);
             }
@@ -106,14 +106,14 @@ contract GenerateMerkleRoot is Script {
     /// @dev Returns the Merkle proof for leaf at `index` in the tree.
     function _getProof(bytes32[][] memory tree, uint256 index) internal pure returns (bytes32[] memory proof) {
         uint256 depth = tree.length - 1; // number of levels above the leaf layer
-        proof         = new bytes32[](depth);
+        proof = new bytes32[](depth);
 
         for (uint256 lvl = 0; lvl < depth; ++lvl) {
-            bytes32[] memory layer  = tree[lvl];
-            uint256          pLen   = layer.length;
-            uint256          sibling = (index % 2 == 0)
+            bytes32[] memory layer = tree[lvl];
+            uint256 pLen = layer.length;
+            uint256 sibling = (index % 2 == 0)
                 ? (index + 1 < pLen ? index + 1 : index)  // right sibling (or self if last)
-                : index - 1;                               // left sibling
+                : index - 1; // left sibling
             proof[lvl] = layer[sibling];
             index /= 2;
         }

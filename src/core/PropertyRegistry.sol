@@ -58,7 +58,7 @@ contract PropertyRegistry is IPropertyRegistry, Initializable, AccessControl, UU
         uint256 pricePerToken,
         address spvAddress,
         bytes32 legalHash,
-        uint16  jurisdiction
+        uint16 jurisdiction
     ) external returns (uint256 propertyId) {
         if (bytes(metadataURI).length == 0) revert PropertyRegistry__InvalidMetadataURI();
         if (totalSupply == 0) revert PropertyRegistry__InvalidSupply();
@@ -66,28 +66,25 @@ contract PropertyRegistry is IPropertyRegistry, Initializable, AccessControl, UU
         propertyId = _nextPropertyId++;
 
         _properties[propertyId] = Types.Property({
-            propertyId:      propertyId,
-            owner:           msg.sender,
-            metadataURI:     metadataURI,
-            totalSupply:     totalSupply,
-            pricePerToken:   pricePerToken,
-            status:          Types.PropertyStatus.Draft,
-            createdAt:       block.timestamp,
-            tokenAddress:    address(0),
+            propertyId: propertyId,
+            owner: msg.sender,
+            metadataURI: metadataURI,
+            totalSupply: totalSupply,
+            pricePerToken: pricePerToken,
+            status: Types.PropertyStatus.Draft,
+            createdAt: block.timestamp,
+            tokenAddress: address(0),
             offeringContract: address(0),
-            spvAddress:      spvAddress,
-            legalHash:       legalHash,
-            jurisdiction:    jurisdiction
+            spvAddress: spvAddress,
+            legalHash: legalHash,
+            jurisdiction: jurisdiction
         });
 
         emit PropertyRegistered(propertyId, msg.sender, metadataURI, totalSupply);
     }
 
     /// @inheritdoc IPropertyRegistry
-    function updateMetadata(
-        uint256 propertyId,
-        string calldata newURI
-    ) external {
+    function updateMetadata(uint256 propertyId, string calldata newURI) external {
         Types.Property storage prop = _getExistingProperty(propertyId);
         _requireEditRights(prop, propertyId);
         if (bytes(newURI).length == 0) revert PropertyRegistry__InvalidMetadataURI();
@@ -97,31 +94,24 @@ contract PropertyRegistry is IPropertyRegistry, Initializable, AccessControl, UU
     }
 
     /// @inheritdoc IPropertyRegistry
-    function updateLegalDetails(
-        uint256 propertyId,
-        address spvAddress,
-        bytes32 legalHash,
-        uint16  jurisdiction
-    ) external {
+    function updateLegalDetails(uint256 propertyId, address spvAddress, bytes32 legalHash, uint16 jurisdiction)
+        external
+    {
         Types.Property storage prop = _getExistingProperty(propertyId);
         _requireEditRights(prop, propertyId);
-        prop.spvAddress   = spvAddress;
-        prop.legalHash    = legalHash;
+        prop.spvAddress = spvAddress;
+        prop.legalHash = legalHash;
         prop.jurisdiction = jurisdiction;
         emit PropertyLegalDetailsUpdated(propertyId, spvAddress, legalHash, jurisdiction);
     }
 
     /// @inheritdoc IPropertyRegistry
-    function updateOfferingTerms(
-        uint256 propertyId,
-        uint256 totalSupply,
-        uint256 pricePerToken
-    ) external {
+    function updateOfferingTerms(uint256 propertyId, uint256 totalSupply, uint256 pricePerToken) external {
         Types.Property storage prop = _getExistingProperty(propertyId);
         _requireEditRights(prop, propertyId);
         if (totalSupply == 0) revert PropertyRegistry__InvalidSupply();
 
-        prop.totalSupply   = totalSupply;
+        prop.totalSupply = totalSupply;
         prop.pricePerToken = pricePerToken;
         emit PropertyOfferingTermsUpdated(propertyId, totalSupply, pricePerToken);
     }
@@ -138,10 +128,7 @@ contract PropertyRegistry is IPropertyRegistry, Initializable, AccessControl, UU
     }
 
     /// @inheritdoc IPropertyRegistry
-    function rejectSubmission(
-        uint256 propertyId,
-        string calldata reason
-    ) external onlyRole(PROPERTY_ADMIN_ROLE) {
+    function rejectSubmission(uint256 propertyId, string calldata reason) external onlyRole(PROPERTY_ADMIN_ROLE) {
         Types.Property storage prop = _getExistingProperty(propertyId);
         if (prop.status != Types.PropertyStatus.UnderReview) revert PropertyRegistry__InvalidStatus(propertyId);
         emit PropertyStatusUpdated(propertyId, uint8(prop.status), uint8(Types.PropertyStatus.Draft));
@@ -190,10 +177,8 @@ contract PropertyRegistry is IPropertyRegistry, Initializable, AccessControl, UU
         Types.Property storage prop = _getExistingProperty(propertyId);
         Types.PropertyStatus s = prop.status;
         if (
-            s == Types.PropertyStatus.None    ||
-            s == Types.PropertyStatus.Draft   ||
-            s == Types.PropertyStatus.Paused  ||
-            s == Types.PropertyStatus.Delisted
+            s == Types.PropertyStatus.None || s == Types.PropertyStatus.Draft || s == Types.PropertyStatus.Paused
+                || s == Types.PropertyStatus.Delisted
         ) revert PropertyRegistry__InvalidStatus(propertyId);
         emit PropertyStatusUpdated(propertyId, uint8(s), uint8(Types.PropertyStatus.Paused));
         prop.status = Types.PropertyStatus.Paused;
@@ -241,9 +226,7 @@ contract PropertyRegistry is IPropertyRegistry, Initializable, AccessControl, UU
         if (prop.status != Types.PropertyStatus.Draft) revert PropertyRegistry__InvalidStatus(propertyId);
     }
 
-    function _getExistingProperty(
-        uint256 propertyId
-    ) internal view returns (Types.Property storage prop) {
+    function _getExistingProperty(uint256 propertyId) internal view returns (Types.Property storage prop) {
         prop = _properties[propertyId];
         if (prop.createdAt == 0) revert PropertyRegistry__PropertyNotFound(propertyId);
     }

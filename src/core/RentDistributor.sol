@@ -66,7 +66,7 @@ contract RentDistributor is IRentDistributor, Initializable, AccessControl, Reen
     uint256 public constant RECLAIM_DELAY = 90 days;
 
     IPropertyRegistry public registry;
-    IERC20            public paymentToken;
+    IERC20 public paymentToken;
 
     /// @dev propertyId => periodId => RentPeriod
     mapping(uint256 => mapping(uint256 => Types.RentPeriod)) private _periods;
@@ -82,20 +82,19 @@ contract RentDistributor is IRentDistributor, Initializable, AccessControl, Reen
 
     function initialize(address admin, address _registry, address _paymentToken) external initializer {
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
-        _grantRole(ADMIN_ROLE,         admin);
-        registry     = IPropertyRegistry(_registry);
+        _grantRole(ADMIN_ROLE, admin);
+        registry = IPropertyRegistry(_registry);
         paymentToken = IERC20(_paymentToken);
     }
 
     // ─── IRentDistributor ────────────────────────────────────────────────────
 
     /// @inheritdoc IRentDistributor
-    function depositRent(
-        uint256 propertyId,
-        uint256 amount,
-        bytes32 merkleRoot,
-        uint256 snapshotBlock
-    ) external nonReentrant returns (uint256 periodId) {
+    function depositRent(uint256 propertyId, uint256 amount, bytes32 merkleRoot, uint256 snapshotBlock)
+        external
+        nonReentrant
+        returns (uint256 periodId)
+    {
         if (amount == 0) revert RentDistributor__ZeroRent();
         if (merkleRoot == bytes32(0)) revert RentDistributor__ZeroMerkleRoot();
         // The snapshot is a hard requirement and must be strictly in the past.
@@ -117,14 +116,14 @@ contract RentDistributor is IRentDistributor, Initializable, AccessControl, Reen
         periodId = ++_nextPeriodId[propertyId];
 
         _periods[propertyId][periodId] = Types.RentPeriod({
-            propertyId:      propertyId,
-            totalRent:       amount,
-            totalClaimed:    0,
-            merkleRoot:      merkleRoot,
-            depositor:       msg.sender,
+            propertyId: propertyId,
+            totalRent: amount,
+            totalClaimed: 0,
+            merkleRoot: merkleRoot,
+            depositor: msg.sender,
             reclaimDeadline: block.timestamp + RECLAIM_DELAY,
-            snapshotBlock:   snapshotBlock,
-            reclaimed:       false
+            snapshotBlock: snapshotBlock,
+            reclaimed: false
         });
 
         paymentToken.safeTransferFrom(msg.sender, address(this), amount);
@@ -132,12 +131,10 @@ contract RentDistributor is IRentDistributor, Initializable, AccessControl, Reen
     }
 
     /// @inheritdoc IRentDistributor
-    function claimRent(
-        uint256 propertyId,
-        uint256 periodId,
-        uint256 claimableAmount,
-        bytes32[] calldata merkleProof
-    ) external nonReentrant {
+    function claimRent(uint256 propertyId, uint256 periodId, uint256 claimableAmount, bytes32[] calldata merkleProof)
+        external
+        nonReentrant
+    {
         _claim(propertyId, periodId, claimableAmount, merkleProof);
     }
 
@@ -170,7 +167,7 @@ contract RentDistributor is IRentDistributor, Initializable, AccessControl, Reen
         if (unclaimed == 0) revert RentDistributor__NothingToReclaim(propertyId, periodId);
 
         // Flag the period and mark it fully claimed so no further claims can be paid.
-        period.reclaimed    = true;
+        period.reclaimed = true;
         period.totalClaimed = period.totalRent;
 
         paymentToken.safeTransfer(period.depositor, unclaimed);
@@ -179,12 +176,9 @@ contract RentDistributor is IRentDistributor, Initializable, AccessControl, Reen
 
     // ─── Internal ────────────────────────────────────────────────────────────
 
-    function _claim(
-        uint256 propertyId,
-        uint256 periodId,
-        uint256 claimableAmount,
-        bytes32[] calldata merkleProof
-    ) internal {
+    function _claim(uint256 propertyId, uint256 periodId, uint256 claimableAmount, bytes32[] calldata merkleProof)
+        internal
+    {
         Types.RentPeriod storage period = _getExistingPeriod(propertyId, periodId);
 
         if (_hasClaimed[propertyId][periodId][msg.sender]) {
@@ -208,10 +202,8 @@ contract RentDistributor is IRentDistributor, Initializable, AccessControl, Reen
         {
             address tokenAddr = registry.getPropertyToken(propertyId);
             uint256 pastTotalSupply = IVotes(tokenAddr).getPastTotalSupply(period.snapshotBlock);
-            uint256 pastVotes      = IVotes(tokenAddr).getPastVotes(msg.sender, period.snapshotBlock);
-            uint256 maxEntitlement = Math.mulDiv(
-                pastVotes, period.totalRent, pastTotalSupply, Math.Rounding.Ceil
-            );
+            uint256 pastVotes = IVotes(tokenAddr).getPastVotes(msg.sender, period.snapshotBlock);
+            uint256 maxEntitlement = Math.mulDiv(pastVotes, period.totalRent, pastTotalSupply, Math.Rounding.Ceil);
             if (claimableAmount > maxEntitlement) {
                 revert RentDistributor__ExceedsEntitlement(
                     propertyId, periodId, msg.sender, claimableAmount, maxEntitlement
@@ -230,10 +222,11 @@ contract RentDistributor is IRentDistributor, Initializable, AccessControl, Reen
         emit RentClaimed(propertyId, periodId, msg.sender, claimableAmount);
     }
 
-    function _getExistingPeriod(
-        uint256 propertyId,
-        uint256 periodId
-    ) internal view returns (Types.RentPeriod storage period) {
+    function _getExistingPeriod(uint256 propertyId, uint256 periodId)
+        internal
+        view
+        returns (Types.RentPeriod storage period)
+    {
         period = _periods[propertyId][periodId];
         if (period.totalRent == 0) {
             revert RentDistributor__NoPeriodFound(propertyId, periodId);

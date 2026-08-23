@@ -13,33 +13,25 @@ import {
     KYCRegistry__KYCExpired,
     KYCRegistry__BatchLengthMismatch
 } from "../../src/utils/Errors.sol";
-import {
-    AccountVerified,
-    AccountRevoked,
-    AccountFrozen,
-    AccountUnfrozen
-} from "../../src/utils/Events.sol";
+import {AccountVerified, AccountRevoked, AccountFrozen, AccountUnfrozen} from "../../src/utils/Events.sol";
 
 contract KYCRegistryTest is Test {
     KYCRegistry internal kyc;
 
-    address internal admin    = makeAddr("admin");
-    address internal alice    = makeAddr("alice");
-    address internal bob      = makeAddr("bob");
+    address internal admin = makeAddr("admin");
+    address internal alice = makeAddr("alice");
+    address internal bob = makeAddr("bob");
     address internal verifier = makeAddr("verifier");
 
     // Standard verify params
-    uint16  internal constant CC  = 840; // USA
-    uint8   internal constant IT  = 2;   // accredited
-    uint48  internal constant NO_EXPIRY = 0;
+    uint16 internal constant CC = 840; // USA
+    uint8 internal constant IT = 2; // accredited
+    uint48 internal constant NO_EXPIRY = 0;
 
     function setUp() public {
         vm.startPrank(admin);
         KYCRegistry impl = new KYCRegistry();
-        kyc = KYCRegistry(address(new ERC1967Proxy(
-            address(impl),
-            abi.encodeCall(KYCRegistry.initialize, (admin))
-        )));
+        kyc = KYCRegistry(address(new ERC1967Proxy(address(impl), abi.encodeCall(KYCRegistry.initialize, (admin)))));
         kyc.grantRole(kyc.VERIFIER_ROLE(), verifier);
         vm.stopPrank();
     }
@@ -97,10 +89,10 @@ contract KYCRegistryTest is Test {
 
         Types.InvestorRecord memory r = kyc.getInvestorRecord(alice);
         assertTrue(r.verified);
-        assertEq(r.countryCode,  276);
+        assertEq(r.countryCode, 276);
         assertEq(r.investorType, 3);
-        assertEq(r.verifiedAt,   uint48(block.timestamp));
-        assertEq(r.expiresAt,    expiry);
+        assertEq(r.verifiedAt, uint48(block.timestamp));
+        assertEq(r.expiresAt, expiry);
         assertFalse(r.frozen);
     }
 
@@ -140,13 +132,7 @@ contract KYCRegistryTest is Test {
     function test_revert_verify_nonVerifier() public {
         bytes32 role = kyc.VERIFIER_ROLE();
         vm.prank(bob);
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                IAccessControl.AccessControlUnauthorizedAccount.selector,
-                bob,
-                role
-            )
-        );
+        vm.expectRevert(abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, bob, role));
         kyc.verify(alice, CC, IT, NO_EXPIRY);
     }
 
@@ -169,9 +155,9 @@ contract KYCRegistryTest is Test {
 
         Types.InvestorRecord memory r = kyc.getInvestorRecord(alice);
         assertFalse(r.verified);
-        assertEq(r.countryCode,  CC);   // preserved
-        assertEq(r.investorType, IT);   // preserved
-        assertEq(r.expiresAt,    expiry); // preserved
+        assertEq(r.countryCode, CC); // preserved
+        assertEq(r.investorType, IT); // preserved
+        assertEq(r.expiresAt, expiry); // preserved
     }
 
     function test_revoke_emitsEvent() public {
@@ -192,13 +178,7 @@ contract KYCRegistryTest is Test {
         _verify(alice);
         bytes32 role = kyc.VERIFIER_ROLE();
         vm.prank(bob);
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                IAccessControl.AccessControlUnauthorizedAccount.selector,
-                bob,
-                role
-            )
-        );
+        vm.expectRevert(abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, bob, role));
         kyc.revoke(alice);
     }
 
@@ -281,13 +261,7 @@ contract KYCRegistryTest is Test {
     function test_revert_freeze_nonVerifier() public {
         bytes32 role = kyc.VERIFIER_ROLE();
         vm.prank(bob);
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                IAccessControl.AccessControlUnauthorizedAccount.selector,
-                bob,
-                role
-            )
-        );
+        vm.expectRevert(abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, bob, role));
         kyc.freeze(alice);
     }
 
@@ -365,13 +339,7 @@ contract KYCRegistryTest is Test {
         _verify(alice);
         bytes32 role = kyc.VERIFIER_ROLE();
         vm.prank(bob);
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                IAccessControl.AccessControlUnauthorizedAccount.selector,
-                bob,
-                role
-            )
-        );
+        vm.expectRevert(abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, bob, role));
         kyc.updateExpiry(alice, 0);
     }
 
@@ -379,13 +347,22 @@ contract KYCRegistryTest is Test {
 
     function test_batchVerify_verifiesAllAccounts() public {
         address[] memory accounts = new address[](3);
-        uint16[]  memory ccs      = new uint16[](3);
-        uint8[]   memory its      = new uint8[](3);
-        uint48[]  memory expiries = new uint48[](3);
+        uint16[] memory ccs = new uint16[](3);
+        uint8[] memory its = new uint8[](3);
+        uint48[] memory expiries = new uint48[](3);
 
-        accounts[0] = alice; ccs[0] = 840; its[0] = 1; expiries[0] = 0;
-        accounts[1] = bob;   ccs[1] = 276; its[1] = 2; expiries[1] = 0;
-        accounts[2] = makeAddr("carol"); ccs[2] = 156; its[2] = 3; expiries[2] = 0;
+        accounts[0] = alice;
+        ccs[0] = 840;
+        its[0] = 1;
+        expiries[0] = 0;
+        accounts[1] = bob;
+        ccs[1] = 276;
+        its[1] = 2;
+        expiries[1] = 0;
+        accounts[2] = makeAddr("carol");
+        ccs[2] = 156;
+        its[2] = 3;
+        expiries[2] = 0;
 
         vm.prank(verifier);
         kyc.batchVerify(accounts, ccs, its, expiries);
@@ -395,18 +372,24 @@ contract KYCRegistryTest is Test {
         assertTrue(kyc.isVerified(accounts[2]));
 
         assertEq(kyc.getInvestorRecord(alice).countryCode, 840);
-        assertEq(kyc.getInvestorRecord(bob).countryCode,   276);
+        assertEq(kyc.getInvestorRecord(bob).countryCode, 276);
         assertEq(kyc.getInvestorRecord(accounts[2]).countryCode, 156);
     }
 
     function test_batchVerify_emitsEventForEach() public {
         address[] memory accounts = new address[](2);
-        uint16[]  memory ccs      = new uint16[](2);
-        uint8[]   memory its      = new uint8[](2);
-        uint48[]  memory expiries = new uint48[](2);
+        uint16[] memory ccs = new uint16[](2);
+        uint8[] memory its = new uint8[](2);
+        uint48[] memory expiries = new uint48[](2);
 
-        accounts[0] = alice; ccs[0] = CC; its[0] = IT; expiries[0] = NO_EXPIRY;
-        accounts[1] = bob;   ccs[1] = CC; its[1] = IT; expiries[1] = NO_EXPIRY;
+        accounts[0] = alice;
+        ccs[0] = CC;
+        its[0] = IT;
+        expiries[0] = NO_EXPIRY;
+        accounts[1] = bob;
+        ccs[1] = CC;
+        its[1] = IT;
+        expiries[1] = NO_EXPIRY;
 
         vm.prank(verifier);
         vm.expectEmit(true, true, false, true, address(kyc));
@@ -417,11 +400,12 @@ contract KYCRegistryTest is Test {
     }
 
     function test_revert_batchVerify_lengthMismatch() public {
-        address[] memory accounts  = new address[](2);
-        uint16[]  memory ccs       = new uint16[](1); // wrong length
-        uint8[]   memory its       = new uint8[](2);
-        uint48[]  memory expiries  = new uint48[](2);
-        accounts[0] = alice; accounts[1] = bob;
+        address[] memory accounts = new address[](2);
+        uint16[] memory ccs = new uint16[](1); // wrong length
+        uint8[] memory its = new uint8[](2);
+        uint48[] memory expiries = new uint48[](2);
+        accounts[0] = alice;
+        accounts[1] = bob;
 
         vm.prank(verifier);
         vm.expectRevert(KYCRegistry__BatchLengthMismatch.selector);
@@ -432,11 +416,17 @@ contract KYCRegistryTest is Test {
         _verify(alice);
 
         address[] memory accounts = new address[](2);
-        uint16[]  memory ccs      = new uint16[](2);
-        uint8[]   memory its      = new uint8[](2);
-        uint48[]  memory expiries = new uint48[](2);
-        accounts[0] = bob;   ccs[0] = CC; its[0] = IT; expiries[0] = 0;
-        accounts[1] = alice; ccs[1] = CC; its[1] = IT; expiries[1] = 0; // already verified
+        uint16[] memory ccs = new uint16[](2);
+        uint8[] memory its = new uint8[](2);
+        uint48[] memory expiries = new uint48[](2);
+        accounts[0] = bob;
+        ccs[0] = CC;
+        its[0] = IT;
+        expiries[0] = 0;
+        accounts[1] = alice; // already verified
+        ccs[1] = CC;
+        its[1] = IT;
+        expiries[1] = 0;
 
         vm.prank(verifier);
         vm.expectRevert(abi.encodeWithSelector(KYCRegistry__AlreadyVerified.selector, alice));
@@ -445,20 +435,17 @@ contract KYCRegistryTest is Test {
 
     function test_revert_batchVerify_nonVerifier() public {
         address[] memory accounts = new address[](1);
-        uint16[]  memory ccs      = new uint16[](1);
-        uint8[]   memory its      = new uint8[](1);
-        uint48[]  memory expiries = new uint48[](1);
-        accounts[0] = alice; ccs[0] = CC; its[0] = IT; expiries[0] = 0;
+        uint16[] memory ccs = new uint16[](1);
+        uint8[] memory its = new uint8[](1);
+        uint48[] memory expiries = new uint48[](1);
+        accounts[0] = alice;
+        ccs[0] = CC;
+        its[0] = IT;
+        expiries[0] = 0;
 
         bytes32 role = kyc.VERIFIER_ROLE();
         vm.prank(bob);
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                IAccessControl.AccessControlUnauthorizedAccount.selector,
-                bob,
-                role
-            )
-        );
+        vm.expectRevert(abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, bob, role));
         kyc.batchVerify(accounts, ccs, its, expiries);
     }
 
@@ -468,10 +455,10 @@ contract KYCRegistryTest is Test {
         Types.InvestorRecord memory r = kyc.getInvestorRecord(alice);
         assertFalse(r.verified);
         assertFalse(r.frozen);
-        assertEq(r.countryCode,  0);
+        assertEq(r.countryCode, 0);
         assertEq(r.investorType, 0);
-        assertEq(r.verifiedAt,   0);
-        assertEq(r.expiresAt,    0);
+        assertEq(r.verifiedAt, 0);
+        assertEq(r.expiresAt, 0);
     }
 
     // ─── Role management ─────────────────────────────────────────────────────
@@ -532,7 +519,7 @@ contract KYCRegistryTest is Test {
         vm.prank(verifier);
         kyc.verify(alice, 276, 3, 0);
         assertTrue(kyc.isVerified(alice));
-        assertEq(kyc.getInvestorRecord(alice).countryCode,  276);
+        assertEq(kyc.getInvestorRecord(alice).countryCode, 276);
         assertEq(kyc.getInvestorRecord(alice).investorType, 3);
     }
 

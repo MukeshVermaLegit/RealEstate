@@ -12,23 +12,19 @@ import {
     IdentityRegistry__IdentityNotFound,
     IdentityRegistry__ZeroAddress
 } from "../../src/utils/Errors.sol";
-import {
-    IdentityRegistered,
-    IdentityDeleted,
-    IdentityCountryUpdated
-} from "../../src/utils/Events.sol";
+import {IdentityRegistered, IdentityDeleted, IdentityCountryUpdated} from "../../src/utils/Events.sol";
 
 contract IdentityRegistryTest is Test {
     IdentityRegistry internal idReg;
-    KYCRegistry      internal kyc;
+    KYCRegistry internal kyc;
 
-    address internal admin  = makeAddr("admin");
-    address internal agent  = makeAddr("agent");
-    address internal alice  = makeAddr("alice");
-    address internal bob    = makeAddr("bob");
+    address internal admin = makeAddr("admin");
+    address internal agent = makeAddr("agent");
+    address internal alice = makeAddr("alice");
+    address internal bob = makeAddr("bob");
 
-    uint16  internal constant CC_USA = 840;
-    uint16  internal constant CC_DEU = 276;
+    uint16 internal constant CC_USA = 840;
+    uint16 internal constant CC_DEU = 276;
     bytes32 internal constant HASH_A = keccak256("alice-identity");
     bytes32 internal constant HASH_B = keccak256("bob-identity");
 
@@ -36,10 +32,7 @@ contract IdentityRegistryTest is Test {
         vm.startPrank(admin);
 
         KYCRegistry kycImpl = new KYCRegistry();
-        kyc = KYCRegistry(address(new ERC1967Proxy(
-            address(kycImpl),
-            abi.encodeCall(KYCRegistry.initialize, (admin))
-        )));
+        kyc = KYCRegistry(address(new ERC1967Proxy(address(kycImpl), abi.encodeCall(KYCRegistry.initialize, (admin)))));
 
         idReg = new IdentityRegistry(admin, address(kyc));
         idReg.grantRole(idReg.IDENTITY_AGENT_ROLE(), agent);
@@ -70,8 +63,8 @@ contract IdentityRegistryTest is Test {
         idReg.registerIdentity(alice, CC_USA, HASH_A);
 
         Types.Identity memory id = idReg.identity(alice);
-        assertEq(id.wallet,       alice);
-        assertEq(id.countryCode,  CC_USA);
+        assertEq(id.wallet, alice);
+        assertEq(id.countryCode, CC_USA);
         assertEq(id.identityHash, HASH_A);
     }
 
@@ -106,9 +99,7 @@ contract IdentityRegistryTest is Test {
     function test_registerIdentity_revert_noRole() public {
         bytes32 role = idReg.IDENTITY_AGENT_ROLE();
         vm.prank(alice);
-        vm.expectRevert(
-            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, alice, role)
-        );
+        vm.expectRevert(abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, alice, role));
         idReg.registerIdentity(bob, CC_USA, HASH_B);
     }
 
@@ -122,8 +113,8 @@ contract IdentityRegistryTest is Test {
         idReg.deleteIdentity(alice);
 
         Types.Identity memory id = idReg.identity(alice);
-        assertEq(id.wallet,       address(0));
-        assertEq(id.countryCode,  0);
+        assertEq(id.wallet, address(0));
+        assertEq(id.countryCode, 0);
         assertEq(id.identityHash, bytes32(0));
     }
 
@@ -221,8 +212,8 @@ contract IdentityRegistryTest is Test {
 
     function test_identity_returnsZeroStructForUnregistered() public view {
         Types.Identity memory id = idReg.identity(bob);
-        assertEq(id.wallet,       address(0));
-        assertEq(id.countryCode,  0);
+        assertEq(id.wallet, address(0));
+        assertEq(id.countryCode, 0);
         assertEq(id.identityHash, bytes32(0));
     }
 

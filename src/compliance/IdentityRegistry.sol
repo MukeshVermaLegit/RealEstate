@@ -42,19 +42,14 @@ contract IdentityRegistry is IIdentityRegistry, AccessControl {
     // ─── Write functions ─────────────────────────────────────────────────────
 
     /// @inheritdoc IIdentityRegistry
-    function registerIdentity(
-        address wallet,
-        uint16  countryCode_,
-        bytes32 identityHash
-    ) external onlyRole(IDENTITY_AGENT_ROLE) {
+    function registerIdentity(address wallet, uint16 countryCode_, bytes32 identityHash)
+        external
+        onlyRole(IDENTITY_AGENT_ROLE)
+    {
         if (wallet == address(0)) revert IdentityRegistry__ZeroAddress();
         if (_registered[wallet]) revert IdentityRegistry__IdentityAlreadyExists(wallet);
 
-        _identities[wallet] = Types.Identity({
-            wallet:       wallet,
-            countryCode:  countryCode_,
-            identityHash: identityHash
-        });
+        _identities[wallet] = Types.Identity({wallet: wallet, countryCode: countryCode_, identityHash: identityHash});
         _registered[wallet] = true;
 
         emit IdentityRegistered(wallet, countryCode_, identityHash);

@@ -10,17 +10,13 @@ import {
     TrustedIssuersRegistry__ZeroAddress,
     TrustedIssuersRegistry__EmptyClaimTopics
 } from "../../src/utils/Errors.sol";
-import {
-    TrustedIssuerAdded,
-    TrustedIssuerRemoved,
-    TrustedIssuerTopicsUpdated
-} from "../../src/utils/Events.sol";
+import {TrustedIssuerAdded, TrustedIssuerRemoved, TrustedIssuerTopicsUpdated} from "../../src/utils/Events.sol";
 
 contract TrustedIssuersRegistryTest is Test {
     TrustedIssuersRegistry internal reg;
 
-    address internal admin  = makeAddr("admin");
-    address internal owner  = makeAddr("owner");
+    address internal admin = makeAddr("admin");
+    address internal owner = makeAddr("owner");
     address internal issuerA = makeAddr("issuerA");
     address internal issuerB = makeAddr("issuerB");
 
@@ -95,11 +91,9 @@ contract TrustedIssuersRegistryTest is Test {
 
     function test_addTrustedIssuer_revert_noRole() public {
         bytes32 role = reg.REGISTRY_OWNER_ROLE();
-        address eve  = makeAddr("eve");
+        address eve = makeAddr("eve");
         vm.prank(eve);
-        vm.expectRevert(
-            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, eve, role)
-        );
+        vm.expectRevert(abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, eve, role));
         reg.addTrustedIssuer(issuerA, topics12);
     }
 

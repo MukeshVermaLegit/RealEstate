@@ -21,7 +21,7 @@ contract TrustedIssuersRegistry is ITrustedIssuersRegistry, AccessControl {
     bytes32 public constant REGISTRY_OWNER_ROLE = keccak256("REGISTRY_OWNER_ROLE");
 
     mapping(address => uint256[]) private _issuerTopics;
-    mapping(address => bool)      private _trusted;
+    mapping(address => bool) private _trusted;
 
     constructor(address admin) {
         if (admin == address(0)) revert TrustedIssuersRegistry__ZeroAddress();
@@ -32,13 +32,10 @@ contract TrustedIssuersRegistry is ITrustedIssuersRegistry, AccessControl {
     // ─── Write functions ─────────────────────────────────────────────────────
 
     /// @inheritdoc ITrustedIssuersRegistry
-    function addTrustedIssuer(
-        address issuer,
-        uint256[] calldata claimTopics
-    ) external onlyRole(REGISTRY_OWNER_ROLE) {
-        if (issuer == address(0))     revert TrustedIssuersRegistry__ZeroAddress();
-        if (_trusted[issuer])         revert TrustedIssuersRegistry__IssuerAlreadyTrusted(issuer);
-        if (claimTopics.length == 0)  revert TrustedIssuersRegistry__EmptyClaimTopics();
+    function addTrustedIssuer(address issuer, uint256[] calldata claimTopics) external onlyRole(REGISTRY_OWNER_ROLE) {
+        if (issuer == address(0)) revert TrustedIssuersRegistry__ZeroAddress();
+        if (_trusted[issuer]) revert TrustedIssuersRegistry__IssuerAlreadyTrusted(issuer);
+        if (claimTopics.length == 0) revert TrustedIssuersRegistry__EmptyClaimTopics();
 
         _trusted[issuer] = true;
         _issuerTopics[issuer] = claimTopics;
@@ -54,12 +51,9 @@ contract TrustedIssuersRegistry is ITrustedIssuersRegistry, AccessControl {
     }
 
     /// @inheritdoc ITrustedIssuersRegistry
-    function updateIssuerTopics(
-        address issuer,
-        uint256[] calldata claimTopics
-    ) external onlyRole(REGISTRY_OWNER_ROLE) {
-        if (!_trusted[issuer])        revert TrustedIssuersRegistry__IssuerNotFound(issuer);
-        if (claimTopics.length == 0)  revert TrustedIssuersRegistry__EmptyClaimTopics();
+    function updateIssuerTopics(address issuer, uint256[] calldata claimTopics) external onlyRole(REGISTRY_OWNER_ROLE) {
+        if (!_trusted[issuer]) revert TrustedIssuersRegistry__IssuerNotFound(issuer);
+        if (claimTopics.length == 0) revert TrustedIssuersRegistry__EmptyClaimTopics();
         _issuerTopics[issuer] = claimTopics;
         emit TrustedIssuerTopicsUpdated(issuer, claimTopics);
     }

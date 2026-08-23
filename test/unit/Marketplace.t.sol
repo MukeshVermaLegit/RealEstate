@@ -34,19 +34,19 @@ import {
 
 contract MarketplaceTest is Test {
     PropertyRegistry internal registry;
-    KYCRegistry      internal kyc;
-    PropertyToken    internal token;
-    MockERC20        internal usdc;
-    Marketplace      internal market;
+    KYCRegistry internal kyc;
+    PropertyToken internal token;
+    MockERC20 internal usdc;
+    Marketplace internal market;
 
     address internal admin = makeAddr("admin");
     address internal alice = makeAddr("alice"); // seller
-    address internal bob   = makeAddr("bob");   // buyer
+    address internal bob = makeAddr("bob"); // buyer
 
     uint256 internal propertyId;
 
-    uint256 internal constant TOKEN_SUPPLY  = 1_000 ether;
-    uint256 internal constant ALICE_TOKENS  = 600 ether;
+    uint256 internal constant TOKEN_SUPPLY = 1_000 ether;
+    uint256 internal constant ALICE_TOKENS = 600 ether;
     /// @dev Payment-token units per ONE WHOLE property token (1e18 wei) — the unit
     ///      Marketplace and PropertyOffering now share. Cost = amount * price / 1e18.
     uint256 internal constant PRICE_PER_TOK = 10 ether;
@@ -56,18 +56,14 @@ contract MarketplaceTest is Test {
 
         // Deploy registries via proxies
         PropertyRegistry registryImpl = new PropertyRegistry();
-        registry = PropertyRegistry(address(new ERC1967Proxy(
-            address(registryImpl),
-            abi.encodeCall(PropertyRegistry.initialize, (admin))
-        )));
+        registry = PropertyRegistry(
+            address(new ERC1967Proxy(address(registryImpl), abi.encodeCall(PropertyRegistry.initialize, (admin))))
+        );
 
         KYCRegistry kycImpl = new KYCRegistry();
-        kyc = KYCRegistry(address(new ERC1967Proxy(
-            address(kycImpl),
-            abi.encodeCall(KYCRegistry.initialize, (admin))
-        )));
+        kyc = KYCRegistry(address(new ERC1967Proxy(address(kycImpl), abi.encodeCall(KYCRegistry.initialize, (admin)))));
 
-        usdc     = new MockERC20("Mock USDC", "USDC");
+        usdc = new MockERC20("Mock USDC", "USDC");
 
         propertyId = registry.registerProperty("ipfs://QmProp", TOKEN_SUPPLY, PRICE_PER_TOK, address(0), bytes32(0), 0);
 
@@ -77,14 +73,20 @@ contract MarketplaceTest is Test {
 
         // Deploy Marketplace via proxy
         Marketplace marketImpl = new Marketplace();
-        market = Marketplace(address(new ERC1967Proxy(
-            address(marketImpl),
-            abi.encodeCall(Marketplace.initialize, (admin, address(registry), address(kyc), address(usdc), 0, address(0)))
-        )));
+        market = Marketplace(
+            address(
+                new ERC1967Proxy(
+                    address(marketImpl),
+                    abi.encodeCall(
+                        Marketplace.initialize, (admin, address(registry), address(kyc), address(usdc), 0, address(0))
+                    )
+                )
+            )
+        );
 
         // KYC both users AND the marketplace contract (it receives tokens in escrow)
-        kyc.verify(alice,           840, 2, 0);
-        kyc.verify(bob,             840, 2, 0);
+        kyc.verify(alice, 840, 2, 0);
+        kyc.verify(bob, 840, 2, 0);
         kyc.verify(address(market), 840, 2, 0);
 
         // Mint tokens to alice
@@ -141,13 +143,13 @@ contract MarketplaceTest is Test {
         uint256 listingId = market.createListing(propertyId, 100 ether, PRICE_PER_TOK, 0);
 
         Types.Listing memory l = market.getListing(listingId);
-        assertEq(l.listingId,     listingId);
-        assertEq(l.propertyId,    propertyId);
-        assertEq(l.seller,        alice);
-        assertEq(l.tokenAmount,   100 ether);
+        assertEq(l.listingId, listingId);
+        assertEq(l.propertyId, propertyId);
+        assertEq(l.seller, alice);
+        assertEq(l.tokenAmount, 100 ether);
         assertEq(l.pricePerToken, PRICE_PER_TOK);
         assertEq(uint8(l.status), uint8(Types.ListingStatus.Active));
-        assertEq(l.tokenAddress,  address(token));
+        assertEq(l.tokenAddress, address(token));
     }
 
     function test_createListing_transfersTokensToEscrow() public {
@@ -222,7 +224,7 @@ contract MarketplaceTest is Test {
         assertEq(token.balanceOf(bob), 40 ether);
         // Listing still active with remaining tokens
         Types.Listing memory l = market.getListing(listingId);
-        assertEq(uint8(l.status),    uint8(Types.ListingStatus.Active));
+        assertEq(uint8(l.status), uint8(Types.ListingStatus.Active));
         assertEq(l.tokenAmount, 60 ether);
     }
 
@@ -367,17 +369,17 @@ contract MarketplaceTest is Test {
         vm.prank(alice);
         uint256 listingId = market.createListing(propertyId, 100 ether, PRICE_PER_TOK, 0);
 
-        uint256 aliceBefore     = usdc.balanceOf(alice);
+        uint256 aliceBefore = usdc.balanceOf(alice);
         uint256 collectorBefore = usdc.balanceOf(collector);
 
         vm.prank(bob);
         market.buyListing(listingId, 100 ether);
 
         uint256 totalCost = _cost(100 ether);
-        uint256 fee       = (totalCost * 200) / 10_000;
+        uint256 fee = (totalCost * 200) / 10_000;
 
-        assertEq(usdc.balanceOf(collector),   collectorBefore + fee);
-        assertEq(usdc.balanceOf(alice),       aliceBefore + totalCost - fee);
+        assertEq(usdc.balanceOf(collector), collectorBefore + fee);
+        assertEq(usdc.balanceOf(alice), aliceBefore + totalCost - fee);
     }
 
     function test_fee_emitsProtocolFeeCollected() public {
@@ -391,7 +393,7 @@ contract MarketplaceTest is Test {
         uint256 listingId = market.createListing(propertyId, 100 ether, PRICE_PER_TOK, 0);
 
         uint256 totalCost = _cost(100 ether);
-        uint256 fee       = (totalCost * 100) / 10_000;
+        uint256 fee = (totalCost * 100) / 10_000;
 
         vm.prank(bob);
         vm.expectEmit(true, false, false, true, address(market));
@@ -445,9 +447,7 @@ contract MarketplaceTest is Test {
     }
 
     function test_revert_setFee_tooHigh() public {
-        vm.expectRevert(
-            abi.encodeWithSelector(Marketplace__FeeTooHigh.selector, uint16(1001), market.MAX_FEE_BPS())
-        );
+        vm.expectRevert(abi.encodeWithSelector(Marketplace__FeeTooHigh.selector, uint16(1001), market.MAX_FEE_BPS()));
         vm.prank(admin);
         market.setFee(1001);
     }
@@ -573,9 +573,7 @@ contract MarketplaceTest is Test {
 
         vm.prank(bob);
         vm.expectRevert(
-            abi.encodeWithSelector(
-                Marketplace__InsufficientListingAmount.selector, listingId, 101 ether, 100 ether
-            )
+            abi.encodeWithSelector(Marketplace__InsufficientListingAmount.selector, listingId, 101 ether, 100 ether)
         );
         market.buyListing(listingId, 101 ether);
     }

@@ -18,7 +18,7 @@ contract PriceOracle is Initializable, AccessControl, UUPSUpgradeable {
     uint256 public constant MAX_STALENESS = 7 days;
 
     struct PriceFeed {
-        uint256 price;         // USD value of one fractional token (18 decimals)
+        uint256 price; // USD value of one fractional token (18 decimals)
         uint256 lastUpdated;
     }
 

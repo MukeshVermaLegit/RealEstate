@@ -16,7 +16,7 @@ import {TimelockController} from "@openzeppelin/contracts/governance/TimelockCon
 contract DeployGovernance is Script {
     function run() external returns (address timelockAddress) {
         address multisig = vm.envAddress("MULTISIG_ADDRESS");
-        uint256 delay    = vm.envUint("TIMELOCK_DELAY");
+        uint256 delay = vm.envUint("TIMELOCK_DELAY");
 
         address[] memory proposers = new address[](1);
         proposers[0] = multisig;

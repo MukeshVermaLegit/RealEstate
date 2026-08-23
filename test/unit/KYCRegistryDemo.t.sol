@@ -14,7 +14,7 @@ contract KYCRegistryDemoTest is Test {
 
     address internal admin = makeAddr("admin");
     address internal alice = makeAddr("alice");
-    address internal bob   = makeAddr("bob");
+    address internal bob = makeAddr("bob");
 
     bytes32 internal constant DEFAULT_ADMIN_ROLE = 0x00;
 
@@ -22,10 +22,7 @@ contract KYCRegistryDemoTest is Test {
         // Deploy the production registry behind a proxy, then upgrade it to the
         // demo implementation — exactly the path taken on the live testnet.
         KYCRegistry prodImpl = new KYCRegistry();
-        ERC1967Proxy proxy = new ERC1967Proxy(
-            address(prodImpl),
-            abi.encodeCall(KYCRegistry.initialize, (admin))
-        );
+        ERC1967Proxy proxy = new ERC1967Proxy(address(prodImpl), abi.encodeCall(KYCRegistry.initialize, (admin)));
 
         KYCRegistryDemo demoImpl = new KYCRegistryDemo();
         vm.prank(admin);
@@ -65,11 +62,7 @@ contract KYCRegistryDemoTest is Test {
         vm.stopPrank();
 
         assertTrue(kyc.isVerified(alice));
-        assertEq(
-            kyc.getInvestorRecord(alice).verifiedAt,
-            firstVerifiedAt,
-            "a second call must not rewrite the record"
-        );
+        assertEq(kyc.getInvestorRecord(alice).verifiedAt, firstVerifiedAt, "a second call must not rewrite the record");
     }
 
     function test_revert_selfVerify_whenFrozen() public {

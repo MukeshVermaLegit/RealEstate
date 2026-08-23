@@ -14,12 +14,9 @@ interface IMarketplace {
     ///                      e.g. USDC at $50.00/token → 50_000_000
     /// @param expiresAt   Unix timestamp after which the listing expires (0 = no expiry)
     /// @return listingId The ID of the new listing
-    function createListing(
-        uint256 propertyId,
-        uint256 tokenAmount,
-        uint256 pricePerToken,
-        uint48  expiresAt
-    ) external returns (uint256 listingId);
+    function createListing(uint256 propertyId, uint256 tokenAmount, uint256 pricePerToken, uint48 expiresAt)
+        external
+        returns (uint256 listingId);
 
     /// @notice Buy tokens from an active listing
     /// @param listingId The listing to purchase from

@@ -13,8 +13,8 @@ import {PropertyTokenDeployed} from "../../src/utils/Events.sol";
 
 contract PropertyFactoryTest is Test {
     PropertyRegistry internal registry;
-    KYCRegistry      internal kyc;
-    PropertyFactory  internal factory;
+    KYCRegistry internal kyc;
+    PropertyFactory internal factory;
 
     address internal admin = makeAddr("admin");
 
@@ -26,22 +26,17 @@ contract PropertyFactoryTest is Test {
 
         // Deploy via proxies
         PropertyRegistry registryImpl = new PropertyRegistry();
-        registry = PropertyRegistry(address(new ERC1967Proxy(
-            address(registryImpl),
-            abi.encodeCall(PropertyRegistry.initialize, (admin))
-        )));
+        registry = PropertyRegistry(
+            address(new ERC1967Proxy(address(registryImpl), abi.encodeCall(PropertyRegistry.initialize, (admin))))
+        );
 
         KYCRegistry kycImpl = new KYCRegistry();
-        kyc = KYCRegistry(address(new ERC1967Proxy(
-            address(kycImpl),
-            abi.encodeCall(KYCRegistry.initialize, (admin))
-        )));
+        kyc = KYCRegistry(address(new ERC1967Proxy(address(kycImpl), abi.encodeCall(KYCRegistry.initialize, (admin)))));
 
         PropertyFactory factoryImpl = new PropertyFactory();
-        factory = PropertyFactory(address(new ERC1967Proxy(
-            address(factoryImpl),
-            abi.encodeCall(PropertyFactory.initialize, (admin))
-        )));
+        factory = PropertyFactory(
+            address(new ERC1967Proxy(address(factoryImpl), abi.encodeCall(PropertyFactory.initialize, (admin))))
+        );
 
         // Factory needs PROPERTY_ADMIN_ROLE to call registry.setTokenAddress
         registry.grantRole(registry.PROPERTY_ADMIN_ROLE(), address(factory));
@@ -130,9 +125,7 @@ contract PropertyFactoryTest is Test {
             propertyId, "Factory Token", "FT", TOTAL_SUPPLY, address(registry), address(kyc), address(0)
         );
 
-        vm.expectRevert(
-            abi.encodeWithSelector(PropertyFactory__PropertyAlreadyDeployed.selector, propertyId)
-        );
+        vm.expectRevert(abi.encodeWithSelector(PropertyFactory__PropertyAlreadyDeployed.selector, propertyId));
         factory.createPropertyToken(
             propertyId, "Factory Token", "FT", TOTAL_SUPPLY, address(registry), address(kyc), address(0)
         );
@@ -143,9 +136,7 @@ contract PropertyFactoryTest is Test {
         address eve = makeAddr("eve");
         bytes32 role = factory.FACTORY_ROLE();
         vm.prank(eve);
-        vm.expectRevert(
-            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, eve, role)
-        );
+        vm.expectRevert(abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, eve, role));
         factory.createPropertyToken(
             propertyId, "Factory Token", "FT", TOTAL_SUPPLY, address(registry), address(kyc), address(0)
         );

@@ -63,7 +63,7 @@ contract PropertyOffering is IPropertyOffering, AccessControl, ReentrancyGuard {
 
     uint256 public immutable propertyId;
     address public immutable tokenAddress;
-    IERC20  public immutable paymentToken;
+    IERC20 public immutable paymentToken;
     /// @notice Payment-token units per one whole property token (1e18 token wei).
     uint256 public immutable pricePerToken;
     /// @notice Maximum total property-token wei that may be committed.
@@ -76,7 +76,7 @@ contract PropertyOffering is IPropertyOffering, AccessControl, ReentrancyGuard {
     uint256 public immutable lockupDuration;
 
     IPropertyRegistry public immutable registry;
-    IKYCRegistry      public immutable kycRegistry;
+    IKYCRegistry public immutable kycRegistry;
 
     // ─── Mutable state ───────────────────────────────────────────────────────
 
@@ -85,8 +85,8 @@ contract PropertyOffering is IPropertyOffering, AccessControl, ReentrancyGuard {
     uint256 public totalPaymentsReceived;
     /// @notice Lockup expiry applied to every investor, fixed at finalization (0 until then).
     uint256 public lockupExpiry;
-    bool    public finalized;
-    bool    public cancelled;
+    bool public finalized;
+    bool public cancelled;
 
     /// @dev investor => property-token wei committed
     mapping(address => uint256) private _investments;
@@ -115,10 +115,8 @@ contract PropertyOffering is IPropertyOffering, AccessControl, ReentrancyGuard {
         address kycRegistryAddress_
     ) {
         if (
-            tokenAddress_       == address(0) ||
-            paymentToken_       == address(0) ||
-            registryAddress_    == address(0) ||
-            kycRegistryAddress_ == address(0)
+            tokenAddress_ == address(0) || paymentToken_ == address(0) || registryAddress_ == address(0)
+                || kycRegistryAddress_ == address(0)
         ) revert PropertyOffering__ZeroAddress();
         if (pricePerToken_ == 0) revert PropertyOffering__InvalidPrice();
         if (hardCap_ == 0 || softCap_ == 0 || softCap_ > hardCap_) {
@@ -132,17 +130,17 @@ contract PropertyOffering is IPropertyOffering, AccessControl, ReentrancyGuard {
             revert PropertyOffering__HardCapExceedsMaxSupply(hardCap_, tokenMaxSupply);
         }
 
-        propertyId     = propertyId_;
-        tokenAddress   = tokenAddress_;
-        paymentToken   = IERC20(paymentToken_);
-        pricePerToken  = pricePerToken_;
-        hardCap        = hardCap_;
-        softCap        = softCap_;
-        startTime      = startTime_;
-        endTime        = endTime_;
+        propertyId = propertyId_;
+        tokenAddress = tokenAddress_;
+        paymentToken = IERC20(paymentToken_);
+        pricePerToken = pricePerToken_;
+        hardCap = hardCap_;
+        softCap = softCap_;
+        startTime = startTime_;
+        endTime = endTime_;
         lockupDuration = lockupDuration_;
-        registry       = IPropertyRegistry(registryAddress_);
-        kycRegistry    = IKYCRegistry(kycRegistryAddress_);
+        registry = IPropertyRegistry(registryAddress_);
+        kycRegistry = IKYCRegistry(kycRegistryAddress_);
 
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _grantRole(ADMIN_ROLE, msg.sender);
@@ -170,10 +168,10 @@ contract PropertyOffering is IPropertyOffering, AccessControl, ReentrancyGuard {
             _hasInvested[msg.sender] = true;
         }
 
-        _investments[msg.sender]      += tokenAmount;
+        _investments[msg.sender] += tokenAmount;
         _paymentsReceived[msg.sender] += paymentAmount;
-        totalTokensCommitted          += tokenAmount;
-        totalPaymentsReceived         += paymentAmount;
+        totalTokensCommitted += tokenAmount;
+        totalPaymentsReceived += paymentAmount;
 
         emit InvestmentMade(propertyId, msg.sender, tokenAmount, paymentAmount);
     }
@@ -184,11 +182,11 @@ contract PropertyOffering is IPropertyOffering, AccessControl, ReentrancyGuard {
     ///      claimTokens(). May be called before endTime — reaching the soft cap early is a
     ///      successful offering.
     function finalizeOffering() external onlyRole(ADMIN_ROLE) nonReentrant {
-        if (finalized)  revert PropertyOffering__AlreadyFinalized();
-        if (cancelled)  revert PropertyOffering__AlreadyCancelled();
+        if (finalized) revert PropertyOffering__AlreadyFinalized();
+        if (cancelled) revert PropertyOffering__AlreadyCancelled();
         if (totalTokensCommitted < softCap) revert PropertyOffering__SoftCapNotReached();
 
-        finalized    = true;
+        finalized = true;
         lockupExpiry = block.timestamp + lockupDuration;
 
         uint256 totalPayment = totalPaymentsReceived;
@@ -256,7 +254,7 @@ contract PropertyOffering is IPropertyOffering, AccessControl, ReentrancyGuard {
         if (paymentAmount == 0) revert PropertyOffering__NothingToClaim(msg.sender);
 
         _paymentsReceived[msg.sender] = 0;
-        _investments[msg.sender]      = 0;
+        _investments[msg.sender] = 0;
 
         paymentToken.safeTransfer(msg.sender, paymentAmount);
 

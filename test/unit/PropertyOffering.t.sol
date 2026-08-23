@@ -6,11 +6,11 @@ import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol"
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 import {PropertyOffering} from "../../src/core/PropertyOffering.sol";
-import {PropertyRegistry}  from "../../src/core/PropertyRegistry.sol";
-import {PropertyToken}     from "../../src/core/PropertyToken.sol";
-import {KYCRegistry}       from "../../src/compliance/KYCRegistry.sol";
-import {MockERC20}         from "../helpers/MockERC20.sol";
-import {Types}             from "../../src/utils/Types.sol";
+import {PropertyRegistry} from "../../src/core/PropertyRegistry.sol";
+import {PropertyToken} from "../../src/core/PropertyToken.sol";
+import {KYCRegistry} from "../../src/compliance/KYCRegistry.sol";
+import {MockERC20} from "../helpers/MockERC20.sol";
+import {Types} from "../../src/utils/Types.sol";
 import {
     PropertyOffering__HardCapReached,
     PropertyOffering__OfferingNotActive,
@@ -41,70 +41,59 @@ import {
 contract PropertyOfferingTest is Test {
     // ─── Contracts ───────────────────────────────────────────────────────────
 
-    KYCRegistry      internal kyc;
+    KYCRegistry internal kyc;
     PropertyRegistry internal registry;
-    PropertyToken    internal propToken;
-    MockERC20        internal payToken;
+    PropertyToken internal propToken;
+    MockERC20 internal payToken;
     PropertyOffering internal offering;
 
     // ─── Actors ──────────────────────────────────────────────────────────────
 
-    address internal admin    = makeAddr("admin");
-    address internal alice    = makeAddr("alice");
-    address internal bob      = makeAddr("bob");
-    address internal charlie  = makeAddr("charlie"); // not KYC verified
+    address internal admin = makeAddr("admin");
+    address internal alice = makeAddr("alice");
+    address internal bob = makeAddr("bob");
+    address internal charlie = makeAddr("charlie"); // not KYC verified
 
     // ─── Constants ───────────────────────────────────────────────────────────
 
-    uint256 internal constant PROPERTY_ID    = 1;
-    uint256 internal constant MAX_SUPPLY     = 10_000 ether;  // 10 000 property tokens
-    uint256 internal constant PRICE_PER_TOKEN = 100e18;       // 100 pay-tokens per property token
-    uint256 internal constant HARD_CAP        = 1_000 ether;  // 1 000 property tokens
-    uint256 internal constant SOFT_CAP        = 100 ether;    // 100 property tokens
+    uint256 internal constant PROPERTY_ID = 1;
+    uint256 internal constant MAX_SUPPLY = 10_000 ether; // 10 000 property tokens
+    uint256 internal constant PRICE_PER_TOKEN = 100e18; // 100 pay-tokens per property token
+    uint256 internal constant HARD_CAP = 1_000 ether; // 1 000 property tokens
+    uint256 internal constant SOFT_CAP = 100 ether; // 100 property tokens
     uint256 internal constant LOCKUP_DURATION = 30 days;
 
     uint256 internal startTime;
     uint256 internal endTime;
 
-    string  internal constant URI    = "ipfs://QmTest";
+    string internal constant URI = "ipfs://QmTest";
     uint256 internal constant SUPPLY = 10_000 ether;
-    uint256 internal constant PRICE  = 1e18;
+    uint256 internal constant PRICE = 1e18;
 
     // ─── setUp ───────────────────────────────────────────────────────────────
 
     function setUp() public {
         // 1. KYCRegistry via proxy
         KYCRegistry kycImpl = new KYCRegistry();
-        kyc = KYCRegistry(address(new ERC1967Proxy(
-            address(kycImpl),
-            abi.encodeCall(KYCRegistry.initialize, (admin))
-        )));
+        kyc = KYCRegistry(address(new ERC1967Proxy(address(kycImpl), abi.encodeCall(KYCRegistry.initialize, (admin)))));
 
         // 2. PropertyRegistry via proxy
         PropertyRegistry registryImpl = new PropertyRegistry();
-        registry = PropertyRegistry(address(new ERC1967Proxy(
-            address(registryImpl),
-            abi.encodeCall(PropertyRegistry.initialize, (admin))
-        )));
+        registry = PropertyRegistry(
+            address(new ERC1967Proxy(address(registryImpl), abi.encodeCall(PropertyRegistry.initialize, (admin))))
+        );
 
         // 3. PropertyToken (admin holds MINTER_ROLE initially)
         vm.prank(admin);
-        propToken = new PropertyToken(
-            "RWA Property Token",
-            "RWA",
-            PROPERTY_ID,
-            MAX_SUPPLY,
-            admin,
-            address(kyc),
-            address(0)
-        );
+        propToken =
+            new PropertyToken("RWA Property Token", "RWA", PROPERTY_ID, MAX_SUPPLY, admin, address(kyc), address(0));
 
         // 4. Mock payment token
         payToken = new MockERC20("USD Stablecoin", "USDC");
 
         // Timestamps
         startTime = block.timestamp + 100;
-        endTime   = block.timestamp + 1_000;
+        endTime = block.timestamp + 1_000;
 
         // 5. Deploy PropertyOffering
         vm.prank(admin);
@@ -130,21 +119,21 @@ contract PropertyOfferingTest is Test {
         // 7. Advance registry to OfferingOpen
         vm.startPrank(admin);
         registry.registerProperty(URI, SUPPLY, PRICE, address(0), bytes32(0), 0); // id = 1, Draft
-        registry.submitForReview(PROPERTY_ID);         // UnderReview
-        registry.approveProperty(PROPERTY_ID);         // Approved
+        registry.submitForReview(PROPERTY_ID); // UnderReview
+        registry.approveProperty(PROPERTY_ID); // Approved
         registry.openOffering(PROPERTY_ID, address(offering)); // OfferingOpen
         vm.stopPrank();
 
         // 8. KYC verify alice and bob; charlie remains unverified
         vm.startPrank(admin);
-        kyc.verify(alice,    840, 1, 0);
-        kyc.verify(bob,      840, 1, 0);
-        kyc.verify(admin,    840, 1, 0);
+        kyc.verify(alice, 840, 1, 0);
+        kyc.verify(bob, 840, 1, 0);
+        kyc.verify(admin, 840, 1, 0);
         vm.stopPrank();
 
         // 9. Fund alice and bob with payment tokens
         payToken.mint(alice, 500_000 ether);
-        payToken.mint(bob,   500_000 ether);
+        payToken.mint(bob, 500_000 ether);
 
         // 10. Approve offering contract to pull payment tokens
         vm.prank(alice);
@@ -186,7 +175,7 @@ contract PropertyOfferingTest is Test {
 
     function test_invest_emitsEvent() public {
         vm.warp(startTime + 1);
-        uint256 tokenAmount   = 10 ether;
+        uint256 tokenAmount = 10 ether;
         uint256 paymentAmount = tokenAmount * PRICE_PER_TOKEN / 1e18;
 
         vm.prank(alice);
@@ -282,25 +271,27 @@ contract PropertyOfferingTest is Test {
     ///      allocation, so a large investor list can never make finalization run out of gas.
     function test_finalizeOffering_doesNotMint() public {
         _investAs(alice, 100 ether);
-        _investAs(bob,   50 ether);
+        _investAs(bob, 50 ether);
         vm.prank(admin);
         offering.finalizeOffering();
 
         assertEq(propToken.balanceOf(alice), 0);
-        assertEq(propToken.balanceOf(bob),   0);
+        assertEq(propToken.balanceOf(bob), 0);
     }
 
     function test_claimTokens_mintsAllocation() public {
         _investAs(alice, 100 ether);
-        _investAs(bob,   50 ether);
+        _investAs(bob, 50 ether);
         vm.prank(admin);
         offering.finalizeOffering();
 
-        vm.prank(alice); offering.claimTokens();
-        vm.prank(bob);   offering.claimTokens();
+        vm.prank(alice);
+        offering.claimTokens();
+        vm.prank(bob);
+        offering.claimTokens();
 
         assertEq(propToken.balanceOf(alice), 100 ether);
-        assertEq(propToken.balanceOf(bob),    50 ether);
+        assertEq(propToken.balanceOf(bob), 50 ether);
         assertTrue(offering.hasClaimedTokens(alice));
         assertTrue(offering.hasClaimedTokens(bob));
     }
@@ -319,7 +310,7 @@ contract PropertyOfferingTest is Test {
 
     function test_claimTokensFor_batchPushesToInvestors() public {
         _investAs(alice, 100 ether);
-        _investAs(bob,    50 ether);
+        _investAs(bob, 50 ether);
         vm.prank(admin);
         offering.finalizeOffering();
 
@@ -329,7 +320,7 @@ contract PropertyOfferingTest is Test {
         offering.claimTokensFor(batch);
 
         assertEq(propToken.balanceOf(alice), 100 ether);
-        assertEq(propToken.balanceOf(bob),    50 ether);
+        assertEq(propToken.balanceOf(bob), 50 ether);
     }
 
     function test_revert_claimTokens_twice() public {
@@ -341,9 +332,7 @@ contract PropertyOfferingTest is Test {
         offering.claimTokens();
 
         vm.prank(alice);
-        vm.expectRevert(
-            abi.encodeWithSelector(PropertyOffering__TokensAlreadyClaimed.selector, alice)
-        );
+        vm.expectRevert(abi.encodeWithSelector(PropertyOffering__TokensAlreadyClaimed.selector, alice));
         offering.claimTokens();
     }
 
@@ -360,16 +349,14 @@ contract PropertyOfferingTest is Test {
         offering.finalizeOffering();
 
         vm.prank(bob);
-        vm.expectRevert(
-            abi.encodeWithSelector(PropertyOffering__NothingToClaim.selector, bob)
-        );
+        vm.expectRevert(abi.encodeWithSelector(PropertyOffering__NothingToClaim.selector, bob));
         offering.claimTokens();
     }
 
     function test_investorEnumeration() public {
         _investAs(alice, 100 ether);
-        _investAs(bob,    50 ether);
-        _investAs(alice,  10 ether); // repeat investor is not double-counted
+        _investAs(bob, 50 ether);
+        _investAs(alice, 10 ether); // repeat investor is not double-counted
 
         assertEq(offering.investorCount(), 2);
         assertEq(offering.investorAt(0), alice);
@@ -377,7 +364,7 @@ contract PropertyOfferingTest is Test {
     }
 
     function test_finalizeOffering_transfersFundsToOwner() public {
-        uint256 tokenAmount   = SOFT_CAP;
+        uint256 tokenAmount = SOFT_CAP;
         uint256 paymentAmount = tokenAmount * PRICE_PER_TOKEN / 1e18;
 
         uint256 ownerBefore = payToken.balanceOf(admin); // admin is property owner
@@ -395,10 +382,7 @@ contract PropertyOfferingTest is Test {
 
     function test_finalizeOffering_closesRegistry() public {
         _finalizeWithAlice();
-        assertEq(
-            uint8(registry.getProperty(PROPERTY_ID).status),
-            uint8(Types.PropertyStatus.OfferingClosed)
-        );
+        assertEq(uint8(registry.getProperty(PROPERTY_ID).status), uint8(Types.PropertyStatus.OfferingClosed));
     }
 
     function test_finalizeOffering_setsLockup() public {
@@ -408,7 +392,7 @@ contract PropertyOfferingTest is Test {
         offering.finalizeOffering();
 
         assertEq(offering.getLockupExpiry(alice), expectedExpiry);
-        assertEq(offering.lockupExpiry(),         expectedExpiry);
+        assertEq(offering.lockupExpiry(), expectedExpiry);
 
         // The token-level lockup is applied when the investor claims.
         vm.prank(alice);
@@ -417,7 +401,7 @@ contract PropertyOfferingTest is Test {
     }
 
     function test_finalizeOffering_emitsEvent() public {
-        uint256 tokenAmount   = SOFT_CAP;
+        uint256 tokenAmount = SOFT_CAP;
         uint256 paymentAmount = tokenAmount * PRICE_PER_TOKEN / 1e18;
         _investAs(alice, tokenAmount);
 
@@ -468,10 +452,7 @@ contract PropertyOfferingTest is Test {
     function test_cancelOffering_closesRegistry() public {
         vm.prank(admin);
         offering.cancelOffering();
-        assertEq(
-            uint8(registry.getProperty(PROPERTY_ID).status),
-            uint8(Types.PropertyStatus.OfferingClosed)
-        );
+        assertEq(uint8(registry.getProperty(PROPERTY_ID).status), uint8(Types.PropertyStatus.OfferingClosed));
     }
 
     function test_cancelOffering_emitsEvent() public {
@@ -497,7 +478,7 @@ contract PropertyOfferingTest is Test {
     // ─── refund() ────────────────────────────────────────────────────────────
 
     function test_refund_returnsPayment() public {
-        uint256 tokenAmount   = 50 ether;
+        uint256 tokenAmount = 50 ether;
         uint256 paymentAmount = tokenAmount * PRICE_PER_TOKEN / 1e18;
         _investAs(alice, tokenAmount);
 
@@ -520,7 +501,7 @@ contract PropertyOfferingTest is Test {
     }
 
     function test_refund_emitsEvent() public {
-        uint256 tokenAmount   = 50 ether;
+        uint256 tokenAmount = 50 ether;
         uint256 paymentAmount = tokenAmount * PRICE_PER_TOKEN / 1e18;
         _investAs(alice, tokenAmount);
         vm.prank(admin);
@@ -538,9 +519,7 @@ contract PropertyOfferingTest is Test {
         vm.prank(admin);
         offering.cancelOffering();
         vm.prank(bob);
-        vm.expectRevert(
-            abi.encodeWithSelector(PropertyOffering__NothingToClaim.selector, bob)
-        );
+        vm.expectRevert(abi.encodeWithSelector(PropertyOffering__NothingToClaim.selector, bob));
         offering.refund();
     }
 
@@ -551,9 +530,7 @@ contract PropertyOfferingTest is Test {
         vm.prank(alice);
         offering.refund(); // first refund
         vm.prank(alice);
-        vm.expectRevert(
-            abi.encodeWithSelector(PropertyOffering__NothingToClaim.selector, alice)
-        );
+        vm.expectRevert(abi.encodeWithSelector(PropertyOffering__NothingToClaim.selector, alice));
         offering.refund(); // second refund is rejected outright
     }
 
@@ -576,9 +553,7 @@ contract PropertyOfferingTest is Test {
 
         // alice tries to transfer to bob while locked
         vm.prank(alice);
-        vm.expectRevert(
-            abi.encodeWithSelector(PropertyToken__TransferLocked.selector, alice, expectedExpiry)
-        );
+        vm.expectRevert(abi.encodeWithSelector(PropertyToken__TransferLocked.selector, alice, expectedExpiry));
         propToken.transfer(bob, 1 ether);
     }
 
@@ -701,7 +676,7 @@ contract PropertyOfferingTest is Test {
     ///      invariant "escrow is drained exactly" must still hold.
     function test_finalize_drainsEscrowExactly() public {
         _investAs(alice, 60 ether);
-        _investAs(bob,   40 ether);
+        _investAs(bob, 40 ether);
 
         uint256 escrow = payToken.balanceOf(address(offering));
         assertEq(escrow, offering.totalPaymentsReceived());
@@ -745,38 +720,56 @@ contract PropertyOfferingTest is Test {
     function test_revert_constructor_hardCapAboveTokenMaxSupply() public {
         vm.prank(admin);
         vm.expectRevert(
-            abi.encodeWithSelector(
-                PropertyOffering__HardCapExceedsMaxSupply.selector, MAX_SUPPLY + 1, MAX_SUPPLY
-            )
+            abi.encodeWithSelector(PropertyOffering__HardCapExceedsMaxSupply.selector, MAX_SUPPLY + 1, MAX_SUPPLY)
         );
         new PropertyOffering(
-            PROPERTY_ID, address(propToken), address(payToken), PRICE_PER_TOKEN,
-            MAX_SUPPLY + 1, SOFT_CAP, startTime, endTime, LOCKUP_DURATION,
-            address(registry), address(kyc)
+            PROPERTY_ID,
+            address(propToken),
+            address(payToken),
+            PRICE_PER_TOKEN,
+            MAX_SUPPLY + 1,
+            SOFT_CAP,
+            startTime,
+            endTime,
+            LOCKUP_DURATION,
+            address(registry),
+            address(kyc)
         );
     }
 
     function test_revert_constructor_softCapAboveHardCap() public {
         vm.prank(admin);
-        vm.expectRevert(
-            abi.encodeWithSelector(PropertyOffering__InvalidCaps.selector, HARD_CAP + 1, HARD_CAP)
-        );
+        vm.expectRevert(abi.encodeWithSelector(PropertyOffering__InvalidCaps.selector, HARD_CAP + 1, HARD_CAP));
         new PropertyOffering(
-            PROPERTY_ID, address(propToken), address(payToken), PRICE_PER_TOKEN,
-            HARD_CAP, HARD_CAP + 1, startTime, endTime, LOCKUP_DURATION,
-            address(registry), address(kyc)
+            PROPERTY_ID,
+            address(propToken),
+            address(payToken),
+            PRICE_PER_TOKEN,
+            HARD_CAP,
+            HARD_CAP + 1,
+            startTime,
+            endTime,
+            LOCKUP_DURATION,
+            address(registry),
+            address(kyc)
         );
     }
 
     function test_revert_constructor_invalidTimeWindow() public {
         vm.prank(admin);
-        vm.expectRevert(
-            abi.encodeWithSelector(PropertyOffering__InvalidTimeWindow.selector, endTime, startTime)
-        );
+        vm.expectRevert(abi.encodeWithSelector(PropertyOffering__InvalidTimeWindow.selector, endTime, startTime));
         new PropertyOffering(
-            PROPERTY_ID, address(propToken), address(payToken), PRICE_PER_TOKEN,
-            HARD_CAP, SOFT_CAP, endTime, startTime, LOCKUP_DURATION,
-            address(registry), address(kyc)
+            PROPERTY_ID,
+            address(propToken),
+            address(payToken),
+            PRICE_PER_TOKEN,
+            HARD_CAP,
+            SOFT_CAP,
+            endTime,
+            startTime,
+            LOCKUP_DURATION,
+            address(registry),
+            address(kyc)
         );
     }
 

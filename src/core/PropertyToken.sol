@@ -103,7 +103,12 @@ contract PropertyToken is IPropertyToken, ERC20, ERC20Permit, ERC20Votes, Access
     /// @inheritdoc IPropertyToken
     /// @dev Mirrors every guard applied by `_update` for a normal transfer, so a caller
     ///      that gets (true, "") here will not be reverted by the transfer guard.
-    function canTransfer(address from, address to, uint256 amount) external view override returns (bool ok, string memory reason) {
+    function canTransfer(address from, address to, uint256 amount)
+        external
+        view
+        override
+        returns (bool ok, string memory reason)
+    {
         if (paused()) return (false, "paused");
         if (from == address(0) || to == address(0)) return (false, "zero address");
         if (balanceOf(from) < amount) return (false, "insufficient balance");

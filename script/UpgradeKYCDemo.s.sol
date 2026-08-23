@@ -25,7 +25,7 @@ import {KYCRegistryDemo} from "../src/compliance/KYCRegistryDemo.sol";
 ///         KYCRegistry — every record written in the meantime is preserved.
 contract UpgradeKYCDemo is Script {
     function run() external {
-        address proxy    = vm.envAddress("KYC_REGISTRY");
+        address proxy = vm.envAddress("KYC_REGISTRY");
         address deployer = vm.envAddress("DEPLOYER_ADDRESS");
 
         console2.log("=== Upgrade KYCRegistry -> KYCRegistryDemo (TESTNET ONLY) ===");

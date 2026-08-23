@@ -18,39 +18,35 @@ import {PropertyTokensMinted, PropertyTokensBurned, ForcedTransfer} from "../../
 
 contract PropertyTokenTest is Test {
     PropertyRegistry internal registry;
-    KYCRegistry      internal kyc;
-    PropertyToken    internal token;
+    KYCRegistry internal kyc;
+    PropertyToken internal token;
 
     address internal admin = makeAddr("admin");
     address internal alice = makeAddr("alice");
-    address internal bob   = makeAddr("bob");
+    address internal bob = makeAddr("bob");
 
-    uint256 internal constant PROPERTY_ID  = 1;
-    uint256 internal constant MAX_SUPPLY   = 1_000 ether;
+    uint256 internal constant PROPERTY_ID = 1;
+    uint256 internal constant MAX_SUPPLY = 1_000 ether;
 
     function setUp() public {
         vm.startPrank(admin);
 
         PropertyRegistry registryImpl = new PropertyRegistry();
-        registry = PropertyRegistry(address(new ERC1967Proxy(
-            address(registryImpl),
-            abi.encodeCall(PropertyRegistry.initialize, (admin))
-        )));
+        registry = PropertyRegistry(
+            address(new ERC1967Proxy(address(registryImpl), abi.encodeCall(PropertyRegistry.initialize, (admin))))
+        );
 
         KYCRegistry kycImpl = new KYCRegistry();
-        kyc = KYCRegistry(address(new ERC1967Proxy(
-            address(kycImpl),
-            abi.encodeCall(KYCRegistry.initialize, (admin))
-        )));
+        kyc = KYCRegistry(address(new ERC1967Proxy(address(kycImpl), abi.encodeCall(KYCRegistry.initialize, (admin)))));
 
-        token    = new PropertyToken(
+        token = new PropertyToken(
             "PropToken A",
             "PTA",
             PROPERTY_ID,
             MAX_SUPPLY,
             admin,
             address(kyc),
-            address(0)  // no compliance module
+            address(0) // no compliance module
         );
 
         kyc.verify(alice, 840, 2, 0);
@@ -84,12 +80,12 @@ contract PropertyTokenTest is Test {
         vm.startPrank(admin);
         kyc.verify(bob, 840, 2, 0);
         token.mint(alice, 600 ether);
-        token.mint(bob,   400 ether);
+        token.mint(bob, 400 ether);
         vm.stopPrank();
 
         assertEq(token.totalSupply(), MAX_SUPPLY);
         assertEq(token.balanceOf(alice), 600 ether);
-        assertEq(token.balanceOf(bob),   400 ether);
+        assertEq(token.balanceOf(bob), 400 ether);
     }
 
     function test_revert_mint_exceedsMaxSupply() public {
@@ -115,13 +111,7 @@ contract PropertyTokenTest is Test {
     function test_revert_mint_nonMinter() public {
         bytes32 role = token.MINTER_ROLE();
         vm.prank(alice);
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                IAccessControl.AccessControlUnauthorizedAccount.selector,
-                alice,
-                role
-            )
-        );
+        vm.expectRevert(abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, alice, role));
         token.mint(alice, 100 ether);
     }
 
@@ -176,7 +166,7 @@ contract PropertyTokenTest is Test {
         vm.stopPrank();
 
         assertEq(token.balanceOf(alice), 70 ether);
-        assertEq(token.balanceOf(bob),   30 ether);
+        assertEq(token.balanceOf(bob), 30 ether);
     }
 
     function test_forcedTransfer_emitsEvent() public {
@@ -234,7 +224,7 @@ contract PropertyTokenTest is Test {
         token.transfer(bob, 30 ether);
 
         assertEq(token.balanceOf(alice), 70 ether);
-        assertEq(token.balanceOf(bob),   30 ether);
+        assertEq(token.balanceOf(bob), 30 ether);
     }
 
     function test_revert_transfer_toNonKYCAddress() public {
@@ -319,7 +309,7 @@ contract PropertyTokenTest is Test {
         token.transfer(bob, 40 ether);
 
         assertEq(token.delegates(bob), bob);
-        assertEq(token.getVotes(bob),   40 ether);
+        assertEq(token.getVotes(bob), 40 ether);
         assertEq(token.getVotes(alice), 60 ether);
     }
 
@@ -329,17 +319,14 @@ contract PropertyTokenTest is Test {
         vm.startPrank(admin);
         kyc.verify(bob, 840, 2, 0);
         token.mint(alice, 600 ether);
-        token.mint(bob,   400 ether);
+        token.mint(bob, 400 ether);
         vm.stopPrank();
 
         vm.roll(block.number + 1);
         uint256 snap = block.number - 1;
 
         assertEq(token.getPastTotalSupply(snap), 1_000 ether);
-        assertEq(
-            token.getPastVotes(alice, snap) + token.getPastVotes(bob, snap),
-            token.getPastTotalSupply(snap)
-        );
+        assertEq(token.getPastVotes(alice, snap) + token.getPastVotes(bob, snap), token.getPastTotalSupply(snap));
     }
 
     /// @dev An explicit delegation must not be silently overwritten on later receipts.
@@ -357,7 +344,7 @@ contract PropertyTokenTest is Test {
 
         assertEq(token.delegates(alice), bob);
         assertEq(token.getVotes(alice), 0);
-        assertEq(token.getVotes(bob),   150 ether);
+        assertEq(token.getVotes(bob), 150 ether);
     }
 
     function test_autoDelegate_survivesBalanceGoingToZero() public {

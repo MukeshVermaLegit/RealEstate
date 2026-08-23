@@ -54,7 +54,9 @@ error RentDistributor__ReclaimTooEarly(uint256 propertyId, uint256 periodId, uin
 error RentDistributor__ExceedsTotalRent(uint256 propertyId, uint256 periodId);
 error RentDistributor__ArrayLengthMismatch();
 error RentDistributor__InvalidSnapshotBlock(uint256 snapshotBlock);
-error RentDistributor__ExceedsEntitlement(uint256 propertyId, uint256 periodId, address claimant, uint256 claimed, uint256 maxEntitlement);
+error RentDistributor__ExceedsEntitlement(
+    uint256 propertyId, uint256 periodId, address claimant, uint256 claimed, uint256 maxEntitlement
+);
 error RentDistributor__NothingToReclaim(uint256 propertyId, uint256 periodId);
 error RentDistributor__ZeroMerkleRoot();
 error RentDistributor__NoTokenForProperty(uint256 propertyId);

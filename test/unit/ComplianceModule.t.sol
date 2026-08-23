@@ -36,20 +36,20 @@ library Rules {
 }
 
 contract ComplianceModuleTest is Test {
-    ComplianceModule  internal compliance;
-    IdentityRegistry  internal idReg;
-    KYCRegistry       internal kyc;
-    PropertyToken     internal token;
+    ComplianceModule internal compliance;
+    IdentityRegistry internal idReg;
+    KYCRegistry internal kyc;
+    PropertyToken internal token;
 
     address internal admin = makeAddr("admin");
     address internal alice = makeAddr("alice");
-    address internal bob   = makeAddr("bob");
+    address internal bob = makeAddr("bob");
     address internal carol = makeAddr("carol");
-    address internal dave  = makeAddr("dave");
+    address internal dave = makeAddr("dave");
 
-    uint16  internal constant CC_USA = 840;
-    uint16  internal constant CC_DEU = 276;
-    uint16  internal constant CC_IRN = 364; // Iran (example blocked country)
+    uint16 internal constant CC_USA = 840;
+    uint16 internal constant CC_DEU = 276;
+    uint16 internal constant CC_IRN = 364; // Iran (example blocked country)
     uint256 internal constant MAX_SUPPLY = 1_000 ether;
 
     // ─── Setup ───────────────────────────────────────────────────────────────
@@ -59,10 +59,7 @@ contract ComplianceModuleTest is Test {
 
         // KYCRegistry (upgradeable)
         KYCRegistry kycImpl = new KYCRegistry();
-        kyc = KYCRegistry(address(new ERC1967Proxy(
-            address(kycImpl),
-            abi.encodeCall(KYCRegistry.initialize, (admin))
-        )));
+        kyc = KYCRegistry(address(new ERC1967Proxy(address(kycImpl), abi.encodeCall(KYCRegistry.initialize, (admin)))));
 
         // IdentityRegistry
         idReg = new IdentityRegistry(admin, address(kyc));
@@ -71,27 +68,19 @@ contract ComplianceModuleTest is Test {
         compliance = new ComplianceModule(admin, address(idReg));
 
         // PropertyToken wired to ComplianceModule
-        token = new PropertyToken(
-            "RWA Token",
-            "RWA",
-            1,
-            MAX_SUPPLY,
-            admin,
-            address(kyc),
-            address(compliance)
-        );
+        token = new PropertyToken("RWA Token", "RWA", 1, MAX_SUPPLY, admin, address(kyc), address(compliance));
 
         // KYC all actors
         kyc.verify(alice, CC_USA, 2, 0);
-        kyc.verify(bob,   CC_USA, 2, 0);
+        kyc.verify(bob, CC_USA, 2, 0);
         kyc.verify(carol, CC_USA, 2, 0);
-        kyc.verify(dave,  CC_DEU, 2, 0);
+        kyc.verify(dave, CC_DEU, 2, 0);
 
         // Register identities (needed for country checks in ComplianceModule)
         idReg.registerIdentity(alice, CC_USA, keccak256("alice"));
-        idReg.registerIdentity(bob,   CC_USA, keccak256("bob"));
+        idReg.registerIdentity(bob, CC_USA, keccak256("bob"));
         idReg.registerIdentity(carol, CC_USA, keccak256("carol"));
-        idReg.registerIdentity(dave,  CC_DEU, keccak256("dave"));
+        idReg.registerIdentity(dave, CC_DEU, keccak256("dave"));
 
         vm.stopPrank();
     }
@@ -143,9 +132,7 @@ contract ComplianceModuleTest is Test {
     function test_addTokenCompliance_revert_noRole() public {
         bytes32 role = compliance.COMPLIANCE_ADMIN_ROLE();
         vm.prank(alice);
-        vm.expectRevert(
-            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, alice, role)
-        );
+        vm.expectRevert(abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, alice, role));
         compliance.addTokenCompliance(address(token), _noLimitRules());
     }
 
@@ -187,7 +174,7 @@ contract ComplianceModuleTest is Test {
         // Cap at 2 holders
         _addRules(Rules.maxHolders(2));
         _mint(alice, 100 ether);
-        _mint(bob,   100 ether);
+        _mint(bob, 100 ether);
 
         // Both are now holders — compliance tracks them via transferred()
         assertEq(compliance.holderCount(address(token)), 2);
@@ -195,10 +182,10 @@ contract ComplianceModuleTest is Test {
 
     function test_maxHolders_blocksWhenExceeded() public {
         vm.startPrank(admin);
-        PropertyToken token2 = new PropertyToken("T2","T2", 2, MAX_SUPPLY, admin, address(kyc), address(compliance));
+        PropertyToken token2 = new PropertyToken("T2", "T2", 2, MAX_SUPPLY, admin, address(kyc), address(compliance));
         compliance.addTokenCompliance(address(token2), Rules.maxHolders(2));
         token2.mint(alice, 100 ether);
-        token2.mint(bob,   100 ether);
+        token2.mint(bob, 100 ether);
         vm.stopPrank();
 
         assertEq(compliance.holderCount(address(token2)), 2);
@@ -213,14 +200,12 @@ contract ComplianceModuleTest is Test {
     ///      rule engine entirely, leaving maxHolders unenforced on the main path.
     function test_maxHolders_enforcedOnMint() public {
         vm.startPrank(admin);
-        PropertyToken token2 = new PropertyToken("T3","T3", 3, MAX_SUPPLY, admin, address(kyc), address(compliance));
+        PropertyToken token2 = new PropertyToken("T3", "T3", 3, MAX_SUPPLY, admin, address(kyc), address(compliance));
         compliance.addTokenCompliance(address(token2), Rules.maxHolders(2));
         token2.mint(alice, 100 ether);
-        token2.mint(bob,   100 ether);
+        token2.mint(bob, 100 ether);
 
-        vm.expectRevert(
-            abi.encodeWithSelector(ComplianceModule__TransferDenied.selector, "max holders exceeded")
-        );
+        vm.expectRevert(abi.encodeWithSelector(ComplianceModule__TransferDenied.selector, "max holders exceeded"));
         token2.mint(carol, 50 ether);
         vm.stopPrank();
 
@@ -230,7 +215,7 @@ contract ComplianceModuleTest is Test {
     /// @dev Same gap for the per-wallet cap.
     function test_maxTokensPerHolder_enforcedOnMint() public {
         vm.startPrank(admin);
-        PropertyToken token2 = new PropertyToken("T4","T4", 4, MAX_SUPPLY, admin, address(kyc), address(compliance));
+        PropertyToken token2 = new PropertyToken("T4", "T4", 4, MAX_SUPPLY, admin, address(kyc), address(compliance));
         compliance.addTokenCompliance(address(token2), Rules.maxPerHolder(100 ether));
 
         token2.mint(alice, 100 ether); // exactly at the cap — allowed
@@ -247,7 +232,7 @@ contract ComplianceModuleTest is Test {
     /// @dev Burns must stay unrestricted — they reduce exposure, never increase it.
     function test_burn_notRuleChecked() public {
         vm.startPrank(admin);
-        PropertyToken token2 = new PropertyToken("T5","T5", 5, MAX_SUPPLY, admin, address(kyc), address(compliance));
+        PropertyToken token2 = new PropertyToken("T5", "T5", 5, MAX_SUPPLY, admin, address(kyc), address(compliance));
         compliance.addTokenCompliance(address(token2), Rules.maxHolders(1));
         token2.mint(alice, 100 ether);
         token2.burn(alice, 100 ether);
@@ -260,7 +245,7 @@ contract ComplianceModuleTest is Test {
     function test_maxHolders_allowsIfSenderExits() public {
         _addRules(Rules.maxHolders(2));
         _mint(alice, 100 ether);
-        _mint(bob,   100 ether);
+        _mint(bob, 100 ether);
 
         // alice transfers ALL tokens to carol: alice exits (net change = 0)
         (bool ok,) = compliance.canTransfer(address(token), alice, carol, 100 ether);
@@ -295,7 +280,7 @@ contract ComplianceModuleTest is Test {
         IComplianceModule.ComplianceRules memory r = Rules.maxPerHolder(100 ether);
         _addRules(r);
         _mint(alice, 50 ether);
-        _mint(bob,   50 ether);
+        _mint(bob, 50 ether);
 
         // alice sending 50 to bob who already has 50: total 100 — exactly at limit
         (bool ok,) = compliance.canTransfer(address(token), alice, bob, 50 ether);
@@ -306,7 +291,7 @@ contract ComplianceModuleTest is Test {
         IComplianceModule.ComplianceRules memory r = Rules.maxPerHolder(100 ether);
         _addRules(r);
         _mint(alice, 100 ether);
-        _mint(bob,   60 ether);
+        _mint(bob, 60 ether);
 
         // alice transferring 50 to bob who already has 60 → 110 > 100
         (bool ok, string memory reason) = compliance.canTransfer(address(token), alice, bob, 50 ether);
@@ -318,7 +303,7 @@ contract ComplianceModuleTest is Test {
         IComplianceModule.ComplianceRules memory r = Rules.maxPerHolder(100 ether);
         _addRules(r);
         _mint(alice, 100 ether);
-        _mint(bob,   60 ether);
+        _mint(bob, 60 ether);
 
         // Expect transfer to revert with ComplianceModule__TransferDenied
         vm.prank(alice);

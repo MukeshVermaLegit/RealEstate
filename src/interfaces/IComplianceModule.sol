@@ -25,12 +25,10 @@ interface IComplianceModule {
     /// @param amount     Token amount being transferred
     /// @return ok        True if the transfer may proceed
     /// @return reason    Human-readable reason string when ok == false
-    function canTransfer(
-        address tokenAddr,
-        address from,
-        address to,
-        uint256 amount
-    ) external view returns (bool ok, string memory reason);
+    function canTransfer(address tokenAddr, address from, address to, uint256 amount)
+        external
+        view
+        returns (bool ok, string memory reason);
 
     /// @notice Inform the compliance module that a transfer has been executed.
     ///         Must be called by the token contract (msg.sender == tokenAddr) after

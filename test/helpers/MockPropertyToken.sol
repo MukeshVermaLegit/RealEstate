@@ -11,14 +11,9 @@ contract MockPropertyToken is IPropertyToken, ERC20 {
     uint256 private immutable _maxSupply;
     bool private _paused;
 
-    constructor(
-        string memory name,
-        string memory symbol,
-        uint256 propertyId_,
-        uint256 maxSupply_
-    ) ERC20(name, symbol) {
+    constructor(string memory name, string memory symbol, uint256 propertyId_, uint256 maxSupply_) ERC20(name, symbol) {
         _propertyId = propertyId_;
-        _maxSupply  = maxSupply_;
+        _maxSupply = maxSupply_;
     }
 
     function propertyId() external view override returns (uint256) {
@@ -41,7 +36,12 @@ contract MockPropertyToken is IPropertyToken, ERC20 {
         _transfer(from, to, amount);
     }
 
-    function canTransfer(address from, address to, uint256 amount) external view override returns (bool ok, string memory reason) {
+    function canTransfer(address from, address to, uint256 amount)
+        external
+        view
+        override
+        returns (bool ok, string memory reason)
+    {
         if (_paused) return (false, "paused");
         if (balanceOf(from) < amount) return (false, "insufficient balance");
         if (to == address(0)) return (false, "zero address");

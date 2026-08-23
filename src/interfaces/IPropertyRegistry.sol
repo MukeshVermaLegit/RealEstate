@@ -22,7 +22,7 @@ interface IPropertyRegistry {
         uint256 pricePerToken,
         address spvAddress,
         bytes32 legalHash,
-        uint16  jurisdiction
+        uint16 jurisdiction
     ) external returns (uint256 propertyId);
 
     /// @notice Update the IPFS metadata URI for an existing property.
@@ -34,21 +34,12 @@ interface IPropertyRegistry {
     /// @param spvAddress   New SPV entity address (use address(0) to clear)
     /// @param legalHash    New keccak256 hash of the legal document package
     /// @param jurisdiction New ISO 3166-1 numeric jurisdiction code
-    function updateLegalDetails(
-        uint256 propertyId,
-        address spvAddress,
-        bytes32 legalHash,
-        uint16  jurisdiction
-    ) external;
+    function updateLegalDetails(uint256 propertyId, address spvAddress, bytes32 legalHash, uint16 jurisdiction) external;
 
     /// @notice Revise the supply and price of a listing that has not been submitted yet.
     /// @dev    Property owner while still in Draft, or PROPERTY_ADMIN_ROLE at any status.
     ///         Terms are what investors buy against, so they are frozen once review starts.
-    function updateOfferingTerms(
-        uint256 propertyId,
-        uint256 totalSupply,
-        uint256 pricePerToken
-    ) external;
+    function updateOfferingTerms(uint256 propertyId, uint256 totalSupply, uint256 pricePerToken) external;
 
     // ─── Lifecycle transitions ────────────────────────────────────────────────
 

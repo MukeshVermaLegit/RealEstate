@@ -4,10 +4,7 @@ pragma solidity ^0.8.24;
 import {Test} from "../../lib/forge-std/src/Test.sol";
 import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
 import {ClaimTopicsRegistry} from "../../src/compliance/ClaimTopicsRegistry.sol";
-import {
-    ClaimTopicsRegistry__TopicAlreadyExists,
-    ClaimTopicsRegistry__TopicNotFound
-} from "../../src/utils/Errors.sol";
+import {ClaimTopicsRegistry__TopicAlreadyExists, ClaimTopicsRegistry__TopicNotFound} from "../../src/utils/Errors.sol";
 import {ClaimTopicAdded, ClaimTopicRemoved} from "../../src/utils/Events.sol";
 
 contract ClaimTopicsRegistryTest is Test {
@@ -60,11 +57,9 @@ contract ClaimTopicsRegistryTest is Test {
 
     function test_addClaimTopic_revert_noRole() public {
         bytes32 role = ctr.TOPICS_OWNER_ROLE();
-        address eve  = makeAddr("eve");
+        address eve = makeAddr("eve");
         vm.prank(eve);
-        vm.expectRevert(
-            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, eve, role)
-        );
+        vm.expectRevert(abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, eve, role));
         ctr.addClaimTopic(1);
     }
 

@@ -11,20 +11,15 @@ interface IKYCRegistry {
     /// @param countryCode  ISO 3166-1 numeric country code
     /// @param investorType 1=retail, 2=accredited, 3=qualified
     /// @param expiresAt    Unix timestamp when KYC expires; 0 = never expires
-    function verify(
-        address account,
-        uint16  countryCode,
-        uint8   investorType,
-        uint48  expiresAt
-    ) external;
+    function verify(address account, uint16 countryCode, uint8 investorType, uint48 expiresAt) external;
 
     /// @notice Batch-verify multiple accounts in one call
     /// @dev Arrays must all be the same length
     function batchVerify(
         address[] calldata accounts,
-        uint16[]  calldata countryCodes,
-        uint8[]   calldata investorTypes,
-        uint48[]  calldata expiresAts
+        uint16[] calldata countryCodes,
+        uint8[] calldata investorTypes,
+        uint48[] calldata expiresAts
     ) external;
 
     /// @notice Revoke KYC approval — sets verified=false, preserves other record data

@@ -45,13 +45,13 @@ contract Marketplace is IMarketplace, Initializable, ReentrancyGuard, Pausable, 
     /// @dev Property tokens are 18-decimal; prices are quoted per whole token.
     uint256 private constant PRICE_SCALE = 1e18;
 
-    uint16  public constant MAX_FEE_BPS = 1000; // 10%
-    uint16  public feeBps;
+    uint16 public constant MAX_FEE_BPS = 1000; // 10%
+    uint16 public feeBps;
     address public feeCollector;
 
     IPropertyRegistry public registry;
-    IKYCRegistry      public kycRegistry;
-    IERC20            public paymentToken;  // e.g. USDC
+    IKYCRegistry public kycRegistry;
+    IERC20 public paymentToken; // e.g. USDC
 
     uint256 private _nextListingId;
 
@@ -68,15 +68,15 @@ contract Marketplace is IMarketplace, Initializable, ReentrancyGuard, Pausable, 
         address _registry,
         address _kycRegistry,
         address _paymentToken,
-        uint16  _feeBps,
+        uint16 _feeBps,
         address _feeCollector
     ) external initializer {
         if (_feeBps > MAX_FEE_BPS) revert Marketplace__FeeTooHigh(_feeBps, MAX_FEE_BPS);
         if (_feeBps > 0 && _feeCollector == address(0)) revert Marketplace__ZeroFeeCollector();
-        registry     = IPropertyRegistry(_registry);
-        kycRegistry  = IKYCRegistry(_kycRegistry);
+        registry = IPropertyRegistry(_registry);
+        kycRegistry = IKYCRegistry(_kycRegistry);
         paymentToken = IERC20(_paymentToken);
-        feeBps       = _feeBps;
+        feeBps = _feeBps;
         feeCollector = _feeCollector;
         _nextListingId = 1;
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
@@ -86,12 +86,12 @@ contract Marketplace is IMarketplace, Initializable, ReentrancyGuard, Pausable, 
     // ─── IMarketplace ────────────────────────────────────────────────────────
 
     /// @inheritdoc IMarketplace
-    function createListing(
-        uint256 propertyId,
-        uint256 tokenAmount,
-        uint256 pricePerToken,
-        uint48  expiresAt
-    ) external nonReentrant whenNotPaused returns (uint256 listingId) {
+    function createListing(uint256 propertyId, uint256 tokenAmount, uint256 pricePerToken, uint48 expiresAt)
+        external
+        nonReentrant
+        whenNotPaused
+        returns (uint256 listingId)
+    {
         if (tokenAmount == 0) revert Marketplace__ZeroAmount();
         if (pricePerToken == 0) revert Marketplace__ZeroPrice();
         if (!kycRegistry.isVerified(msg.sender)) revert Marketplace__NotKYCVerified(msg.sender);
@@ -119,10 +119,7 @@ contract Marketplace is IMarketplace, Initializable, ReentrancyGuard, Pausable, 
     }
 
     /// @inheritdoc IMarketplace
-    function buyListing(
-        uint256 listingId,
-        uint256 amount
-    ) external nonReentrant whenNotPaused {
+    function buyListing(uint256 listingId, uint256 amount) external nonReentrant whenNotPaused {
         if (amount == 0) revert Marketplace__ZeroAmount();
         if (!kycRegistry.isVerified(msg.sender)) revert Marketplace__NotKYCVerified(msg.sender);
 
@@ -198,14 +195,17 @@ contract Marketplace is IMarketplace, Initializable, ReentrancyGuard, Pausable, 
         emit FeeCollectorUpdated(newCollector);
     }
 
-    function pause() external onlyRole(ADMIN_ROLE) { _pause(); }
-    function unpause() external onlyRole(ADMIN_ROLE) { _unpause(); }
+    function pause() external onlyRole(ADMIN_ROLE) {
+        _pause();
+    }
+
+    function unpause() external onlyRole(ADMIN_ROLE) {
+        _unpause();
+    }
 
     // ─── Internal ────────────────────────────────────────────────────────────
 
-    function _getActiveListing(
-        uint256 listingId
-    ) internal view returns (Types.Listing storage listing) {
+    function _getActiveListing(uint256 listingId) internal view returns (Types.Listing storage listing) {
         listing = _listings[listingId];
         if (listing.createdAt == 0) revert Marketplace__ListingNotFound(listingId);
         if (listing.status != Types.ListingStatus.Active) revert Marketplace__ListingNotActive(listingId);
