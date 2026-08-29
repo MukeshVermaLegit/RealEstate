@@ -4,7 +4,7 @@
 
 Each building becomes an ERC-20. Investors buy fractions with USDC, rent is distributed on-chain, and positions stay tradable on a permissioned secondary market. Live on Sepolia.
 
-![Landing page](image.png)
+![Landing page](screenshots/image.png)
 
 ---
 
@@ -125,53 +125,53 @@ Nothing is investable until an admin approves it, and a token cannot be minted b
 
 Every asset in the registry, with live offering status and price per token.
 
-![Properties](image-1.png)
+![Properties](screenshots/image-1.png)
 
 The detail page reads straight from chain — owner, token contract, offering contract, SPV, legal-pack hash — and links the IPFS metadata CID with a gateway fallback list.
 
-![Property detail](image-3.png)
+![Property detail](screenshots/image-3.png)
 
 ### List a property
 
 A four-step wizard: property → tokenisation → legal → review. Photos and metadata are pinned to IPFS first, then `registerProperty` writes the CID on-chain as a **Draft**.
 
-![List a property](image-4.png)
+![List a property](screenshots/image-4.png)
 
 ### Admin · registry
 
 Each row shows the single next lifecycle transition available. `Deploy token` calls the factory, `Mint` issues supply, `Open offering` deploys the sale contract, grants it `MINTER_ROLE`, and flips the property to `OfferingOpen` — three transactions, reported step by step.
 
-![Admin registry](image-5.png)
+![Admin registry](screenshots/image-5.png)
 
 ### Admin · investors & KYC
 
 Verification writes the wallet into the KYC registry with country, investor type and expiry. Until it lands, the compliance module rejects every transfer to that address. Freezing blocks transfers and rent claims immediately; revoking removes the record.
 
-![Admin KYC](image-6.png)
+![Admin KYC](screenshots/image-6.png)
 
 ### Admin · rent distribution
 
 Pick a property, a rent amount and a past snapshot block. The server rebuilds the holder set from that block and previews the allocation before anything is signed.
 
-![Admin rent](image-9.png)
+![Admin rent](screenshots/image-9.png)
 
 ### Admin · protocol fees
 
 Marketplace fee in basis points (max 1000) and the collector address. Both apply to every subsequent settlement.
 
-![Admin fees](image-7.png)
+![Admin fees](screenshots/image-7.png)
 
 ### Secondary market
 
 Listings settle only between wallets that pass the on-chain compliance check. Sellers escrow their tokens in the marketplace; buyers pay in USDC, with cost rounded up so dust is never free.
 
-![Marketplace](image-8.png)
+![Marketplace](screenshots/image-8.png)
 
 ### Portfolio
 
 Positions, lockups and claimable rent, all read directly from the token and distributor contracts.
 
-![Portfolio](image-2.png)
+![Portfolio](screenshots/image-2.png)
 
 ---
 
