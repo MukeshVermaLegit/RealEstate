@@ -4,6 +4,9 @@ import { RentDistributorABI } from '../contracts/abis';
 /** Maximum number of periods to probe per property before stopping. */
 const MAX_PERIODS_PER_PROPERTY = 20;
 
+/** This app serves its own claim sets; see app/api/rent/claims. */
+const DEFAULT_MERKLE_API = '/api/rent/claims';
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export type PeriodClaimsJSON = {
@@ -32,11 +35,15 @@ export type ClaimItem = {
 export async function fetchPeriodClaims(
   propertyId: bigint,
   periodId:   number,
+  chainId?:   number,
 ): Promise<PeriodClaimsJSON | null> {
-  const base = process.env.NEXT_PUBLIC_MERKLE_API_URL ?? '';
-  if (!base) return null;
+  // Defaults to this app's own route. Point NEXT_PUBLIC_MERKLE_API_URL at a static
+  // host instead if the claim sets are ever published outside the app — the URL
+  // scheme is the same either way.
+  const base = process.env.NEXT_PUBLIC_MERKLE_API_URL || DEFAULT_MERKLE_API;
+  const query = chainId ? `?chainId=${chainId}` : '';
 
-  const res = await fetch(`${base}/${propertyId}/${periodId}.json`);
+  const res = await fetch(`${base}/${propertyId}/${periodId}.json${query}`);
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`Merkle API error ${res.status} for period ${periodId}`);
 
@@ -71,6 +78,7 @@ export async function fetchAllUnclaimedForAddress(
   address:                `0x${string}`,
   publicClient:           PublicClient,
   rentDistributorAddress: `0x${string}`,
+  chainId?:               number,
 ): Promise<ClaimItem[]> {
   const unclaimed: ClaimItem[] = [];
 
@@ -80,7 +88,7 @@ export async function fetchAllUnclaimedForAddress(
         let periodData: PeriodClaimsJSON | null;
 
         try {
-          periodData = await fetchPeriodClaims(propertyId, pid);
+          periodData = await fetchPeriodClaims(propertyId, pid, chainId);
         } catch {
           break; // Unexpected API error — stop probing this property
         }

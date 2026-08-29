@@ -12,6 +12,7 @@ import { isAddress, parseAbiItem } from 'viem';
 import { useQuery } from '@tanstack/react-query';
 import { KYCRegistryABI } from '@/lib/contracts/abis';
 import { useContracts } from '@/lib/contracts/useContracts';
+import { collectLogs } from '@/lib/chain/getLogsChunked';
 import { countryName } from '@/lib/constants/countries';
 import { formatDate, shortAddress } from '@/lib/format';
 import { explorerAddressUrl } from '@/lib/explorer';
@@ -63,7 +64,7 @@ const ACCOUNT_VERIFIED_EVENT = parseAbiItem(
 );
 
 export default function AdminKYC() {
-  const { addresses } = useContracts();
+  const { addresses, deployBlocks } = useContracts();
   const chainId = useChainId();
   const { writeContract, isPending, data: txHash } = useWriteContract();
   const { isLoading: isConfirming } = useWaitForTransactionReceipt({ hash: txHash });
@@ -81,12 +82,15 @@ export default function AdminKYC() {
     queryKey: ['kyc-verified-addresses', addresses.kycRegistry],
     queryFn: async () => {
       if (!publicClient) return [] as `0x${string}`[];
-      const logs = await publicClient.getLogs({
-        address: addresses.kycRegistry,
-        event: ACCOUNT_VERIFIED_EVENT,
-        fromBlock: 0n,
-        toBlock: 'latest',
-      });
+      const head = await publicClient.getBlockNumber();
+      const logs = await collectLogs(deployBlocks.kycRegistry, head, (fromBlock, toBlock) =>
+        publicClient.getLogs({
+          address: addresses.kycRegistry,
+          event: ACCOUNT_VERIFIED_EVENT,
+          fromBlock,
+          toBlock,
+        }),
+      );
       const seen = new Map<string, `0x${string}`>();
       logs.forEach((log) => {
         if (log.args.account) seen.set(log.args.account.toLowerCase(), log.args.account);

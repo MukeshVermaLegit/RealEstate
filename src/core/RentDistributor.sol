@@ -174,6 +174,23 @@ contract RentDistributor is IRentDistributor, Initializable, AccessControl, Reen
         emit UnclaimedRentReclaimed(propertyId, periodId, unclaimed);
     }
 
+    // ─── Views ───────────────────────────────────────────────────────────────
+
+    /// @inheritdoc IRentDistributor
+    function getRentPeriod(uint256 propertyId, uint256 periodId) external view returns (Types.RentPeriod memory) {
+        return _periods[propertyId][periodId];
+    }
+
+    /// @inheritdoc IRentDistributor
+    function periodCount(uint256 propertyId) external view returns (uint256) {
+        return _nextPeriodId[propertyId];
+    }
+
+    /// @inheritdoc IRentDistributor
+    function hasClaimed(uint256 propertyId, uint256 periodId, address account) external view returns (bool) {
+        return _hasClaimed[propertyId][periodId][account];
+    }
+
     // ─── Internal ────────────────────────────────────────────────────────────
 
     function _claim(uint256 propertyId, uint256 periodId, uint256 claimableAmount, bytes32[] calldata merkleProof)

@@ -3,6 +3,7 @@ import { useAccount, usePublicClient } from 'wagmi';
 import { useQuery } from '@tanstack/react-query';
 import { PropertyRegistryABI } from '../contracts/abis';
 import { useContracts } from '../contracts/useContracts';
+import { collectLogs } from '../chain/getLogsChunked';
 import { PropertyStatus, type Property } from '../types';
 import { usePropertyCount, useProperties } from './useProperties';
 
@@ -54,7 +55,7 @@ export type ReviewNote = { propertyId: bigint; reason: string; blockNumber: bigi
  * same event from an indexer.
  */
 export function useReviewNotes(propertyIds: bigint[]) {
-  const { addresses } = useContracts();
+  const { addresses, deployBlocks } = useContracts();
   const client = usePublicClient();
 
   const ids = useMemo(() => propertyIds.map(String).sort(), [propertyIds]);
@@ -67,14 +68,17 @@ export function useReviewNotes(propertyIds: bigint[]) {
     // cosmetic degradation, so fail quietly rather than retrying the scan.
     retry: false,
     queryFn: async (): Promise<Record<string, ReviewNote>> => {
-      const logs = await client!.getContractEvents({
-        address: addresses.propertyRegistry,
-        abi: PropertyRegistryABI,
-        eventName: 'PropertySubmissionRejected',
-        args: { propertyId: ids.map((id) => BigInt(id)) },
-        fromBlock: 0n,
-        toBlock: 'latest',
-      });
+      const head = await client!.getBlockNumber();
+      const logs = await collectLogs(deployBlocks.propertyRegistry, head, (fromBlock, toBlock) =>
+        client!.getContractEvents({
+          address: addresses.propertyRegistry,
+          abi: PropertyRegistryABI,
+          eventName: 'PropertySubmissionRejected',
+          args: { propertyId: ids.map((id) => BigInt(id)) },
+          fromBlock,
+          toBlock,
+        }),
+      );
 
       // Logs arrive oldest-first, so a later rejection overwrites an earlier one.
       const byId: Record<string, ReviewNote> = {};

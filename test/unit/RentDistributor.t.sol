@@ -8,6 +8,7 @@ import {PropertyRegistry} from "../../src/core/PropertyRegistry.sol";
 import {KYCRegistry} from "../../src/compliance/KYCRegistry.sol";
 import {MockERC20} from "../helpers/MockERC20.sol";
 import {MockVotesToken} from "../helpers/MockVotesToken.sol";
+import {Types} from "../../src/utils/Types.sol";
 import {
     RentDistributor__NotPropertyOwner,
     RentDistributor__NoPeriodFound,
@@ -645,5 +646,80 @@ contract RentDistributorTest is Test {
         distributor.claimRent(propertyId, periodId, dusted, proofA);
         assertEq(usdc.balanceOf(alice), dusted);
     }
-}
 
+    // ─── Views ───────────────────────────────────────────────────────────────
+
+    function test_getRentPeriod_returnsDepositedRecord() public {
+        vm.prank(admin);
+        uint256 periodId = distributor.depositRent(propertyId, TOTAL_RENT, merkleRoot, snapshotBlock);
+
+        Types.RentPeriod memory period = distributor.getRentPeriod(propertyId, periodId);
+
+        assertEq(period.propertyId, propertyId);
+        assertEq(period.totalRent, TOTAL_RENT);
+        assertEq(period.totalClaimed, 0);
+        assertEq(period.merkleRoot, merkleRoot);
+        assertEq(period.depositor, admin);
+        assertEq(period.snapshotBlock, snapshotBlock);
+        assertEq(period.reclaimDeadline, block.timestamp + distributor.RECLAIM_DELAY());
+        assertFalse(period.reclaimed);
+    }
+
+    function test_getRentPeriod_tracksTotalClaimed() public {
+        vm.prank(admin);
+        uint256 periodId = distributor.depositRent(propertyId, TOTAL_RENT, merkleRoot, snapshotBlock);
+
+        vm.prank(alice);
+        distributor.claimRent(propertyId, periodId, ALICE_AMOUNT, proofAlice);
+
+        assertEq(distributor.getRentPeriod(propertyId, periodId).totalClaimed, ALICE_AMOUNT);
+    }
+
+    /// @dev A missing period reads back as a zeroed struct rather than reverting, so
+    ///      callers can probe ids without try/catch. totalRent == 0 means "not found".
+    function test_getRentPeriod_unknownPeriodIsZeroed() public view {
+        Types.RentPeriod memory period = distributor.getRentPeriod(propertyId, 999);
+        assertEq(period.totalRent, 0);
+        assertEq(period.merkleRoot, bytes32(0));
+        assertEq(period.depositor, address(0));
+    }
+
+    function test_periodCount_startsAtZero() public view {
+        assertEq(distributor.periodCount(propertyId), 0);
+    }
+
+    function test_periodCount_incrementsPerDeposit() public {
+        vm.startPrank(admin);
+        distributor.depositRent(propertyId, TOTAL_RENT, merkleRoot, snapshotBlock);
+        assertEq(distributor.periodCount(propertyId), 1);
+        distributor.depositRent(propertyId, TOTAL_RENT, merkleRoot, snapshotBlock);
+        assertEq(distributor.periodCount(propertyId), 2);
+        vm.stopPrank();
+    }
+
+    function test_periodCount_isPerProperty() public {
+        vm.prank(admin);
+        distributor.depositRent(propertyId, TOTAL_RENT, merkleRoot, snapshotBlock);
+
+        assertEq(distributor.periodCount(propertyId), 1);
+        assertEq(distributor.periodCount(propertyId + 1), 0);
+    }
+
+    function test_hasClaimed_falseBeforeClaim() public {
+        vm.prank(admin);
+        uint256 periodId = distributor.depositRent(propertyId, TOTAL_RENT, merkleRoot, snapshotBlock);
+
+        assertFalse(distributor.hasClaimed(propertyId, periodId, alice));
+    }
+
+    function test_hasClaimed_trueAfterClaim() public {
+        vm.prank(admin);
+        uint256 periodId = distributor.depositRent(propertyId, TOTAL_RENT, merkleRoot, snapshotBlock);
+
+        vm.prank(alice);
+        distributor.claimRent(propertyId, periodId, ALICE_AMOUNT, proofAlice);
+
+        assertTrue(distributor.hasClaimed(propertyId, periodId, alice));
+        assertFalse(distributor.hasClaimed(propertyId, periodId, bob));
+    }
+}

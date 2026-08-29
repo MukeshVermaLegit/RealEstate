@@ -26,20 +26,21 @@ export function useRentClaims(
   isLoading:      boolean;
   refetch:        () => void;
 } {
-  const { addresses }  = useContracts();
+  const { addresses, chainId } = useContracts();
   const publicClient   = usePublicClient();
 
   const enabled = !!address && propertyIds.length > 0 && !!publicClient;
 
   const { data, isPending, refetch } = useQuery({
     // Include stable string versions of propertyIds so the key updates correctly
-    queryKey: ['rent-claims', address, propertyIds.map(String)],
+    queryKey: ['rent-claims', address, chainId, propertyIds.map(String)],
     queryFn:  () =>
       fetchAllUnclaimedForAddress(
         propertyIds,
         address!,
         publicClient!,
         addresses.rentDistributor,
+        chainId,
       ),
     enabled,
     staleTime: 30_000,

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
+import {Types} from "../utils/Types.sol";
+
 /// @title IRentDistributor
 /// @notice Manages rental income collection and Merkle-proof-based distribution to investors.
 ///         Off-chain tooling computes a Merkle tree of (investor, claimableAmount) pairs;
@@ -44,4 +46,13 @@ interface IRentDistributor {
     /// @param propertyId  The property ID.
     /// @param periodId    The period ID whose funds are being reclaimed.
     function reclaimUnclaimed(uint256 propertyId, uint256 periodId) external;
+
+    /// @notice Full record for a rent period. A `totalRent` of 0 means it does not exist.
+    function getRentPeriod(uint256 propertyId, uint256 periodId) external view returns (Types.RentPeriod memory);
+
+    /// @notice How many periods have been deposited for `propertyId`. Ids run 1..periodCount.
+    function periodCount(uint256 propertyId) external view returns (uint256);
+
+    /// @notice Whether `account` has already claimed its share of a period.
+    function hasClaimed(uint256 propertyId, uint256 periodId, address account) external view returns (bool);
 }

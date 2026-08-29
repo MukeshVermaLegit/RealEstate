@@ -10,6 +10,7 @@ import { AddToWalletButton } from '../../components/AddToWalletButton';
 import { useRentClaims, useClaimRent, type ClaimItem } from '../../lib/hooks/useRentClaims';
 import { useIPFSMetadata } from '../../lib/hooks/useIPFSMetadata';
 import { ClaimButton } from '../../components/ClaimButton';
+import { DelegateButton } from '../../components/DelegateButton';
 import { cleanTxError, formatNumber, formatTokens, formatUsd, formatUsdCompact } from '../../lib/format';
 import {
   Alert,
@@ -113,6 +114,15 @@ function HoldingsSection({ holdings, isLoading }: { holdings: Holding[]; isLoadi
           />
         </div>
       ) : (
+        <>
+          {/* Holders of pre-fix tokens have zero voting power and cannot claim
+              rent until they delegate once. Surfaced per position because it is
+              a per-token state, not a per-wallet one. */}
+          <div className="space-y-3 px-5 pt-5 empty:hidden">
+            {holdings.map((h) => (
+              <DelegateButton key={h.tokenAddress} tokenAddress={h.tokenAddress} />
+            ))}
+          </div>
         <TableWrap>
           <Table>
             <thead>
@@ -157,6 +167,7 @@ function HoldingsSection({ holdings, isLoading }: { holdings: Holding[]; isLoadi
             </tbody>
           </Table>
         </TableWrap>
+        </>
       )}
     </Card>
   );

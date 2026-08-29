@@ -48,6 +48,15 @@ export const PropertyRegistryABI = [
     inputs: [],
     outputs: [{ name: '', type: 'uint256' }],
   },
+  // RentDistributor resolves the token through the REGISTRY, so rent tooling must
+  // read it from here rather than from the factory's copy.
+  {
+    type: 'function',
+    name: 'getPropertyToken',
+    stateMutability: 'view',
+    inputs: [{ name: 'propertyId', type: 'uint256' }],
+    outputs: [{ name: '', type: 'address' }],
+  },
   {
     type: 'function',
     name: 'submitForReview',
@@ -456,14 +465,69 @@ export const RentDistributorABI = [
     outputs: [],
   },
   {
+    type: 'function',
+    name: 'reclaimUnclaimed',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'propertyId', type: 'uint256' },
+      { name: 'periodId',   type: 'uint256' },
+    ],
+    outputs: [],
+  },
+  {
+    type: 'function',
+    name: 'getRentPeriod',
+    stateMutability: 'view',
+    inputs: [
+      { name: 'propertyId', type: 'uint256' },
+      { name: 'periodId',   type: 'uint256' },
+    ],
+    outputs: [
+      {
+        name: '',
+        type: 'tuple',
+        components: [
+          { name: 'propertyId',      type: 'uint256' },
+          { name: 'totalRent',       type: 'uint256' },
+          { name: 'totalClaimed',    type: 'uint256' },
+          { name: 'merkleRoot',      type: 'bytes32' },
+          { name: 'depositor',       type: 'address' },
+          { name: 'reclaimDeadline', type: 'uint256' },
+          { name: 'snapshotBlock',   type: 'uint256' },
+          { name: 'reclaimed',       type: 'bool'    },
+        ],
+      },
+    ],
+  },
+  {
+    type: 'function',
+    name: 'periodCount',
+    stateMutability: 'view',
+    inputs: [{ name: 'propertyId', type: 'uint256' }],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    type: 'function',
+    name: 'hasClaimed',
+    stateMutability: 'view',
+    inputs: [
+      { name: 'propertyId', type: 'uint256' },
+      { name: 'periodId',   type: 'uint256' },
+      { name: 'account',    type: 'address' },
+    ],
+    outputs: [{ name: '', type: 'bool' }],
+  },
+  // Must match src/utils/Events.sol exactly — an extra input changes topic0 and
+  // the log stops matching. `snapshotBlock` is NOT emitted; read it back with
+  // getRentPeriod instead.
+  {
     type: 'event',
     name: 'RentDeposited',
     inputs: [
-      { name: 'propertyId',    type: 'uint256', indexed: true  },
-      { name: 'periodId',      type: 'uint256', indexed: true  },
-      { name: 'amount',        type: 'uint256', indexed: false },
-      { name: 'merkleRoot',    type: 'bytes32', indexed: false },
-      { name: 'snapshotBlock', type: 'uint256', indexed: false },
+      { name: 'propertyId', type: 'uint256', indexed: true  },
+      { name: 'periodId',   type: 'uint256', indexed: true  },
+      { name: 'amount',     type: 'uint256', indexed: false },
+      { name: 'merkleRoot', type: 'bytes32', indexed: false },
     ],
   },
   {
@@ -472,7 +536,7 @@ export const RentDistributorABI = [
     inputs: [
       { name: 'propertyId', type: 'uint256', indexed: true  },
       { name: 'periodId',   type: 'uint256', indexed: true  },
-      { name: 'investor',   type: 'address', indexed: true  },
+      { name: 'claimant',   type: 'address', indexed: true  },
       { name: 'amount',     type: 'uint256', indexed: false },
     ],
   },
@@ -503,6 +567,31 @@ export const PropertyTokenABI = [
       { name: 'timepoint',   type: 'uint256' },
     ],
     outputs: [{ name: '', type: 'uint256' }],
+  },
+  // The denominator RentDistributor uses for the per-holder entitlement cap.
+  {
+    type: 'function',
+    name: 'getPastTotalSupply',
+    stateMutability: 'view',
+    inputs: [{ name: 'timepoint', type: 'uint256' }],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  // ERC20Votes only checkpoints accounts that have delegated. Tokens from the
+  // original factory did not self-delegate, so holders must call delegate(self)
+  // once or their rent entitlement is computed as zero.
+  {
+    type: 'function',
+    name: 'delegates',
+    stateMutability: 'view',
+    inputs: [{ name: 'account', type: 'address' }],
+    outputs: [{ name: '', type: 'address' }],
+  },
+  {
+    type: 'function',
+    name: 'delegate',
+    stateMutability: 'nonpayable',
+    inputs: [{ name: 'delegatee', type: 'address' }],
+    outputs: [],
   },
   {
     type: 'function',

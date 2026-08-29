@@ -7,6 +7,7 @@ import {
   useWatchContractEvent,
 } from 'wagmi';
 import { parseAbiItem } from 'viem';
+import { collectLogs } from '../chain/getLogsChunked';
 import { MarketplaceABI, PropertyTokenABI, ERC20ABI } from '../contracts/abis';
 import { useContracts } from '../contracts/useContracts';
 import type { ListingStatus } from '../types';
@@ -42,16 +43,20 @@ const LISTING_CREATED_EVENT = parseAbiItem(
 async function fetchListingIds(
   publicClient: ReturnType<typeof usePublicClient>,
   address: `0x${string}`,
+  fromBlock: bigint,
   propertyId?: bigint,
 ): Promise<bigint[]> {
   if (!publicClient) return [];
-  const logs = await publicClient.getLogs({
-    address,
-    event:    LISTING_CREATED_EVENT,
-    args:     propertyId !== undefined ? { propertyId } : undefined,
-    fromBlock: 0n,
-    toBlock:   'latest',
-  });
+  const head = await publicClient.getBlockNumber();
+  const logs = await collectLogs(fromBlock, head, (from, to) =>
+    publicClient.getLogs({
+      address,
+      event: LISTING_CREATED_EVENT,
+      args:  propertyId !== undefined ? { propertyId } : undefined,
+      fromBlock: from,
+      toBlock:   to,
+    }),
+  );
   return [...new Set(logs.map((l) => l.args.listingId!))];
 }
 
@@ -62,7 +67,7 @@ export function useActiveListings(propertyId?: bigint): {
   isLoading: boolean;
   refetch:   () => void;
 } {
-  const { addresses }  = useContracts();
+  const { addresses, deployBlocks } = useContracts();
   const publicClient   = usePublicClient();
   const queryClient    = useQueryClient();
 
@@ -73,7 +78,8 @@ export function useActiveListings(propertyId?: bigint): {
     refetch:  refetchIds,
   } = useQuery({
     queryKey:  ['listing-ids', addresses.marketplace, propertyId?.toString()],
-    queryFn:   () => fetchListingIds(publicClient, addresses.marketplace, propertyId),
+    queryFn:   () =>
+      fetchListingIds(publicClient, addresses.marketplace, deployBlocks.marketplace, propertyId),
     staleTime: 20_000,
   });
 

@@ -121,6 +121,11 @@ contract DeployCore is Script {
         // Factory needs PROPERTY_ADMIN_ROLE to register token addresses
         registry.grantRole(PROPERTY_ADMIN_ROLE, address(factory));
 
+        // Marketplace escrows seller tokens, so it is the `to` of a PropertyToken
+        // transfer and must itself be KYC-verified — otherwise every createListing
+        // reverts with KYCRegistry__NotVerified(marketplace).
+        kyc.verify(address(market), 0, 0, 0); // no country, no type, never expires
+
         // ── 3. Grant all privileged roles to the TimelockController ──────────
 
         // KYCRegistry: grant DEFAULT_ADMIN, ADMIN_ROLE, VERIFIER_ROLE

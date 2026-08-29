@@ -27,12 +27,14 @@ import {
 } from '@/components/ui';
 import AdminProperties, { type PropertyRow } from './AdminProperties';
 import AdminKYC from './AdminKYC';
+import RentPanel from './RentPanel';
 
-type Tab = 'properties' | 'kyc' | 'fees';
+type Tab = 'properties' | 'kyc' | 'rent' | 'fees';
 
 const TABS: { key: Tab; label: string }[] = [
   { key: 'properties', label: 'Properties' },
   { key: 'kyc', label: 'Investors & KYC' },
+  { key: 'rent', label: 'Rent distribution' },
   { key: 'fees', label: 'Protocol fees' },
 ];
 
@@ -138,6 +140,7 @@ export default function AdminPage() {
             <AdminProperties properties={propertyRows} onRefetch={handleRefetch} />
           )}
           {tab === 'kyc' && <AdminKYC />}
+          {tab === 'rent' && <RentPanel properties={propertyRows} />}
           {tab === 'fees' && <FeesTab />}
         </div>
       </Container>
